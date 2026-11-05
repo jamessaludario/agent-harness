@@ -75,6 +75,7 @@
     top.append(chip(TYPE_LABELS[e.type]), chip(scopeLabel(e), 'scope'));
     if (e.source === 'learned') top.append(chip('learned', 'learned'));
     if (e.stale) top.append(chip('unused', 'stale'));
+    if (e.files?.length) top.append(chip(`${e.files.length} file${e.files.length === 1 ? '' : 's'}`, 'scope'));
     c.appendChild(top);
     if (e.description) c.appendChild(el('div', 'mem-desc muted', e.description));
     const body = el('div', 'mem-body', e.body);
@@ -134,6 +135,10 @@
 
   function render() {
     renderTabs();
+    // importing a skill only makes sense from the All and Skills views
+    const showImport = tab === 'all' || tab === 'skill';
+    $('memSkill').hidden = !showImport;
+    $('memSkillHint').hidden = !showImport;
     $('memLearn').value = data.settings.learning;
     $('memLearnHelp').textContent = LEARN_HELP[data.settings.learning] || '';
     const list = $('memList');
@@ -173,6 +178,9 @@
     $('mfBody').placeholder = $('mfType').value === 'skill' ? 'Paste the skill text (a SKILL.md with name/description front matter works)' : 'What should the agent remember?';
     fillScopes(e.scope ?? '');
     $('mfError').hidden = true;
+    const n = e.files?.length || 0;
+    $('mfFiles').hidden = !n;
+    $('mfFiles').textContent = n ? `Package files kept with this skill (${n}): ${e.files.slice(0, 12).join(', ')}${n > 12 ? ', …' : ''}` : '';
     $('memForm').hidden = false;
     $('memList').hidden = true;
     $('mfTitle').focus();
@@ -198,6 +206,8 @@
       scope: $('mfScope').value,
       enabled: editing?.enabled !== false,
       source: editing?.source,
+      resourceDir: editing?.resourceDir, // zip skills: templates already extracted by the main process
+      files: editing?.files,
     };
     if (!entry.body) {
       $('mfError').textContent = 'Add some content first.';
@@ -223,7 +233,7 @@
       if (!skill) return;
       tab = 'skill';
       render();
-      openForm({ type: 'skill', title: skill.title, description: skill.description, body: skill.body, source: 'skill', scope: '' });
+      openForm({ type: 'skill', title: skill.title, description: skill.description, body: skill.body, source: 'skill', scope: '', resourceDir: skill.resourceDir, files: skill.files });
     } catch (err) {
       alert(String(err.message || err));
     }
@@ -244,6 +254,11 @@
     syncBrowser();
   }
   $('memoryBtn').addEventListener('click', () => openDialog());
+  // slash commands (slash.js) are built from the skills stored here
+  window.__mem = {
+    skills: () => data.entries.filter((e) => e.type === 'skill' && e.status === 'active'),
+    open: openDialog,
+  };
   $('memClose').addEventListener('click', () => $('memDlg').close());
   $('memDlg').addEventListener('close', syncBrowser);
 

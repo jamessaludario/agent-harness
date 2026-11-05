@@ -12,7 +12,9 @@
     return e;
   };
 
-  const INLINE = /(`[^`\n]+`)|(\*\*[^*\n][^\n]*?\*\*)|(~~[^~\n]+~~)|(\*[^*\s][^*\n]*?\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s<>)\]]+[^\s<>)\].,;:!?'"])/g;
+  // something/that/looks/like/a/file.ext (no spaces); the Files pane checks whether it really exists
+  const PATH_LIKE = /^(?:[A-Za-z]:[\\/]|\.{1,2}[\\/]|[\\/])?[\w.@~+-]+(?:[\\/][\w.@~+-]+)*\.[A-Za-z0-9]{1,8}$/;
+  const INLINE = /(`[^`\n]+`)|(\*\*[^*\n][^\n]*?\*\*)|(~~[^~\n]+~~)|(\*[^*\s][^*\n]*?\*)|(\[[^\]\n]+\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+[^\s<>)\].,;:!?'"])/g;
 
   function link(parent, label, href, plain) {
     const a = mk('a', 'md-link');
@@ -30,13 +32,25 @@
     for (const m of text.matchAll(INLINE)) {
       if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
       const s = m[0];
-      if (m[1]) parent.appendChild(mk('code', null, s.slice(1, -1)));
+      if (m[1]) {
+        const code = parent.appendChild(mk('code', null, s.slice(1, -1)));
+        if (PATH_LIKE.test(code.textContent)) code.dataset.cand = code.textContent;
+      }
       else if (m[2]) inline(parent.appendChild(mk('strong')), s.slice(2, -2));
       else if (m[3]) inline(parent.appendChild(mk('del')), s.slice(2, -2));
       else if (m[4]) inline(parent.appendChild(mk('em')), s.slice(1, -1));
       else if (m[5]) {
         const close = s.indexOf('](');
-        link(parent, s.slice(1, close), s.slice(close + 2, -1));
+        const label = s.slice(1, close);
+        const target = s.slice(close + 2, -1);
+        if (/^https?:\/\//i.test(target)) link(parent, label, target);
+        else if (/^file:/i.test(target) || (!/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith('#'))) {
+          // a link to a file on disk: opened in the Files pane when it exists
+          const a = mk('a', 'md-link');
+          a.dataset.cand = target;
+          inline(a, label);
+          parent.appendChild(a);
+        } else parent.appendChild(document.createTextNode(label)); // other schemes stay inert text
       } else link(parent, s, s, true);
       last = m.index + s.length;
     }
@@ -79,12 +93,13 @@
     const head = cells(lines[0]);
     const aligns = cells(lines[1]).map((c) => (/^:-*:$/.test(c) ? 'center' : /-:$/.test(c) ? 'right' : ''));
     const t = mk('table', 'md-table');
-    const thead = t.appendChild(mk('thead')).appendChild(mk('tr'));
+    // a table whose header row is empty (key/value style) gets no header bar
+    const thead = head.some(Boolean) ? t.appendChild(mk('thead')).appendChild(mk('tr')) : null;
     head.forEach((h, i) => {
       const th = mk('th');
       if (aligns[i]) th.style.textAlign = aligns[i];
       inline(th, h);
-      thead.appendChild(th);
+      thead?.appendChild(th);
     });
     const tbody = t.appendChild(mk('tbody'));
     for (const row of lines.slice(2)) {
@@ -95,6 +110,12 @@
         inline(td, c);
         tr.appendChild(td);
       });
+    }
+    // columns that only hold short values (IDs, verdicts, types) never wrap; long text columns do
+    const cols = Math.max(head.length, ...lines.slice(2).map((r) => cells(r).length));
+    for (let c = 0; c < cols; c++) {
+      const col = [...t.rows].map((r) => r.cells[c]).filter(Boolean);
+      if (col.every((cell) => cell.textContent.length <= 18)) col.forEach((cell) => cell.classList.add('nw'));
     }
     const scroll = mk('div', 'md-table-wrap');
     scroll.appendChild(t);

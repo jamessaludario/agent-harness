@@ -6,6 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { readZip } = require('./zip');
 
 const TYPES = ['rule', 'standard', 'decision', 'preference', 'note', 'skill'];
 const LEARNING_MODES = ['off', 'suggest', 'smart'];
@@ -28,10 +29,12 @@ const SIGNAL = /\b(always|never|from now on|going forward|remember (that|to)|mak
 const EXPLICIT = /\b(remember (that|to)|from now on|going forward)\b/i;
 
 let file = null;
+let skillsRoot = null; // extracted skill packages (templates etc.) live here
 let data = { settings: { learning: 'suggest' }, entries: [] };
 
 function init(userDataDir) {
   file = path.join(userDataDir, 'memory.json');
+  skillsRoot = path.join(userDataDir, 'skills');
   try {
     const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
     data = {
@@ -43,6 +46,7 @@ function init(userDataDir) {
   }
   if (!LEARNING_MODES.includes(data.settings.learning)) data.settings.learning = 'suggest';
   expire();
+  sweepSkillDirs();
 }
 
 function persist() {
@@ -85,6 +89,61 @@ function parseSkill(text, fallbackName = 'Skill') {
   return { title: meta.name || fallbackName, description: meta.description || '', body: m[2].trim() };
 }
 
+// ---- skill packages (zip with SKILL.md + templates) ---------------------------
+const isUnderSkills = (p) => {
+  if (!skillsRoot || !p) return false;
+  const rel = path.relative(skillsRoot, path.resolve(p));
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
+
+function removeSkillDir(dir) {
+  if (isUnderSkills(dir)) fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// Drop extracted folders no entry refers to (e.g. an import the user cancelled).
+function sweepSkillDirs() {
+  if (!skillsRoot || !fs.existsSync(skillsRoot)) return;
+  const used = new Set(data.entries.map((e) => e.resourceDir && path.resolve(e.resourceDir)).filter(Boolean));
+  for (const d of fs.readdirSync(skillsRoot)) {
+    const full = path.join(skillsRoot, d);
+    if (!used.has(path.resolve(full))) removeSkillDir(full);
+  }
+}
+
+/**
+ * Unpack a skill zip: finds SKILL.md (at the root or inside one folder), writes the
+ * whole package under the app's skills folder and returns the parsed skill.
+ */
+function extractSkillZip(buf, fallbackName = 'Skill') {
+  const files = readZip(buf);
+  const skillFile = files
+    .filter((f) => path.posix.basename(f.name).toLowerCase() === 'skill.md')
+    .sort((a, b) => a.name.split('/').length - b.name.split('/').length)[0];
+  if (!skillFile) throw new Error('No SKILL.md found in that zip');
+
+  const rootDir = path.posix.dirname(skillFile.name); // '.' when at the zip root
+  const prefix = rootDir === '.' ? '' : `${rootDir}/`;
+  const inside = files.filter((f) => f.name.startsWith(prefix));
+  const parsed = parseSkill(skillFile.data.toString('utf8'), rootDir === '.' ? fallbackName : path.posix.basename(rootDir));
+
+  const dir = path.join(skillsRoot, crypto.randomUUID());
+  const names = [];
+  try {
+    for (const f of inside) {
+      const rel = f.name.slice(prefix.length);
+      const target = path.join(dir, ...rel.split('/'));
+      if (path.relative(dir, target).startsWith('..')) continue; // belt and braces against path tricks
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, f.data);
+      names.push(rel);
+    }
+  } catch (e) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
+  return { ...parsed, resourceDir: dir, files: names.sort() };
+}
+
 // ---- CRUD ------------------------------------------------------------------
 const clip = (s, n) => String(s ?? '').slice(0, n);
 
@@ -103,7 +162,15 @@ function clean(e, existing) {
   if (!title || !body) throw new Error('A memory needs a title and some content');
   const scope = e.scope ? path.resolve(String(e.scope)) : '';
   const t = now();
+  let resourceDir = type === 'skill' ? existing?.resourceDir || '' : '';
+  let files = type === 'skill' ? existing?.files || [] : [];
+  if (type === 'skill' && e.resourceDir && isUnderSkills(e.resourceDir) && fs.existsSync(e.resourceDir)) {
+    resourceDir = path.resolve(e.resourceDir);
+    files = Array.isArray(e.files) ? e.files.map((f) => clip(f, 200)).slice(0, 500) : files;
+  }
   return {
+    resourceDir,
+    files,
     id: existing?.id || crypto.randomUUID(),
     type,
     title,
@@ -130,6 +197,7 @@ function upsert(e) {
 }
 
 function remove(id) {
+  removeSkillDir(data.entries.find((e) => e.id === id)?.resourceDir);
   data.entries = data.entries.filter((e) => e.id !== id);
   persist();
 }
@@ -189,8 +257,9 @@ function applicable(cwd) {
 
 function buildPrompt(cwd) {
   const active = applicable(cwd);
-  if (!active.length) return { text: '', ids: [] };
+  if (!active.length) return { text: '', ids: [], dirs: [] };
   const ids = [];
+  const dirs = []; // skill package folders the agent must be allowed to read
   let out =
     '# Memory bank\nThe user keeps these durable rules, standards, decisions and skills. Follow them in this work. ' +
     'If one conflicts with an explicit instruction in this conversation, follow the conversation.\n';
@@ -213,15 +282,33 @@ function buildPrompt(cwd) {
   if (skills.length) {
     out += '\n## Skills\nProcedures the user taught. Apply the matching one when its description fits the task.\n';
     for (const e of skills) {
-      const full = `\n### ${e.title}\n${e.description ? `${e.description}\n` : ''}${clip(e.body, 2500)}\n`;
-      const short = `\n### ${e.title}\n${e.description || clip(e.body, 200)}\n`;
+      // a zip skill keeps its templates on disk; tell the agent where, so it can read them on demand
+      const hasFiles = !!e.resourceDir && fs.existsSync(e.resourceDir);
+      const where = hasFiles ? `Skill files are in ${e.resourceDir} (read them with your file tools when needed): ${e.files.slice(0, 40).join(', ')}\n` : '';
+      const cut = e.body.length > 2500 ? `\n[truncated; full text in ${hasFiles ? path.join(e.resourceDir, 'SKILL.md') : 'the memory bank'}]` : '';
+      const full = `\n### ${e.title}\n${e.description ? `${e.description}\n` : ''}${where}${clip(e.body, 2500)}${cut}\n`;
+      const short = `\n### ${e.title}\n${e.description || clip(e.body, 200)}\n${where}`;
       const pick = full.length <= room() ? full : short.length <= room() ? short : '';
       if (!pick) break;
       out += pick;
       ids.push(e.id);
+      if (hasFiles) dirs.push(e.resourceDir);
     }
   }
-  return { text: out, ids };
+  return { text: out, ids, dirs };
+}
+
+/** Full text of a skill the user invoked explicitly with /name (not truncated, even if disabled). */
+function skillInvocation(id) {
+  const e = data.entries.find((x) => x.id === id && x.type === 'skill' && x.status === 'active');
+  if (!e) return null;
+  const hasFiles = !!e.resourceDir && fs.existsSync(e.resourceDir);
+  const where = hasFiles ? `Skill files are in ${e.resourceDir} (read templates and other files from there): ${e.files.slice(0, 60).join(', ')}\n\n` : '';
+  const text =
+    `[The user invoked the "${e.title}" skill with a slash command. Follow it for this request.]\n\n` +
+    `${e.description ? `${e.description}\n\n` : ''}${where}${clip(e.body, 30000)}\n\n[End of skill]\n\nUser request: `;
+  markUsed([e.id]);
+  return { text, dir: hasFiles ? e.resourceDir : null, title: e.title };
 }
 
 function markUsed(ids) {
@@ -311,6 +398,6 @@ async function learnFromTurn({ prompt, reply, cwd, ask }) {
 }
 
 module.exports = {
-  init, list, upsert, remove, setEnabled, setLearning, resolve,
+  init, list, upsert, extractSkillZip, skillInvocation, remove, setEnabled, setLearning, resolve,
   buildPrompt, markUsed, parseSkill, learnFromTurn, CRITERIA,
 };

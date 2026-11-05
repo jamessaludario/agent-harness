@@ -13,6 +13,8 @@ const IS_WIN = process.platform === 'win32';
 let view = null;
 let getWin = () => null;
 let sendBrowser = () => {};
+let viewVisible = false;
+const consoleLog = []; // { level, message, at }
 
 function normalizeUrl(input) {
   let u = String(input || '').trim();
@@ -42,6 +44,14 @@ function ensureView() {
   const push = () =>
     sendBrowser({ url: wc.getURL(), title: wc.getTitle(), canGoBack: wc.navigationHistory.canGoBack(), canGoForward: wc.navigationHistory.canGoForward(), loading: wc.isLoading() });
   for (const ev of ['did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-stop-loading']) wc.on(ev, push);
+  // keep the page's recent console output so the agent can read it
+  wc.on('console-message', (_e, level, message, line, sourceId) => {
+    consoleLog.push({ level: ['verbose', 'info', 'warning', 'error'][level] || 'info', message: String(message).slice(0, 500), at: `${sourceId || ''}:${line}` });
+    if (consoleLog.length > 100) consoleLog.shift();
+  });
+  wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) consoleLog.length = 0; // new page, fresh log
+  });
   // Links that want a new window open in the same view; nothing else gets to open windows.
   wc.setWindowOpenHandler(({ url }) => {
     const ok = normalizeUrl(url);
@@ -61,8 +71,16 @@ function setBounds(b) {
 }
 function setVisible(show) {
   const v = ensureView();
-  if (v) v.setVisible(!!show);
+  viewVisible = !!show;
+  if (v) v.setVisible(viewVisible);
 }
+// for the agent's browser tools (browser-mcp.js)
+const pane = {
+  webContents: () => ensureView()?.webContents ?? null,
+  isVisible: () => viewVisible,
+  console: () => consoleLog.slice(),
+  normalizeUrl,
+};
 function navigate(input) {
   const v = ensureView();
   const url = normalizeUrl(input);
@@ -132,4 +150,4 @@ function init({ getWindow, onBrowserState }) {
   sendBrowser = onBrowserState;
 }
 
-module.exports = { init, setBounds, setVisible, navigate, nav, openExternal, termRun, termKill, killAll, validCwd };
+module.exports = { init, setBounds, setVisible, navigate, nav, openExternal, termRun, termKill, killAll, validCwd, pane };

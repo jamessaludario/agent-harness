@@ -58,7 +58,10 @@ const efforts = [
 ];
 const EFFORTS = new Set(efforts.map((e) => e.id).filter(Boolean));
 
-function buildArgs({ sessionId, permissionMode, model, effort, extraDirs, memoryFile }) {
+// "Tool" or "Tool(pattern)", e.g. PowerShell(gh *). Kept strict because args may reach a Windows shell line.
+const TOOL_RULE = /^[A-Za-z][A-Za-z0-9_]*(\([A-Za-z0-9 _.:\/\\*@=+-]{1,120}\))?$/;
+
+function buildArgs({ sessionId, permissionMode, model, effort, extraDirs, memoryFile, allowedTools, mcpConfigFile }) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
   if (memoryFile) {
     // memory bank text lives in a file so it never touches the command line
@@ -72,6 +75,16 @@ function buildArgs({ sessionId, permissionMode, model, effort, extraDirs, memory
   if (model) {
     if (!SAFE_TOKEN.test(model)) throw new Error('Invalid model name');
     args.push('--model', model);
+  }
+  if (mcpConfigFile) {
+    if (!validFile(mcpConfigFile)) throw new Error('MCP config file is missing or has unsupported characters');
+    args.push('--mcp-config', mcpConfigFile);
+  }
+  if (Array.isArray(allowedTools) && allowedTools.length) {
+    // Headless runs cannot ask for approval, so anything not pre-allowed is simply denied.
+    const rules = [...new Set(allowedTools.map((r) => String(r).trim()).filter(Boolean))].slice(0, 100);
+    for (const r of rules) if (!TOOL_RULE.test(r)) throw new Error(`Invalid allowed-command rule: ${r}`);
+    if (rules.length) args.push('--allowedTools', rules.join(','));
   }
   if (effort) {
     if (!EFFORTS.has(effort)) throw new Error('Invalid effort level');
@@ -149,6 +162,12 @@ function normalize(msg, state, emit) {
         isError: !!msg.is_error,
         costUsd: msg.total_cost_usd,
         durationMs: msg.duration_ms,
+        // tools the CLI refused because nobody could approve them in a headless run
+        denials: (Array.isArray(msg.permission_denials) ? msg.permission_denials : []).slice(0, 20).map((d) => ({
+          tool: String(d.tool_name ?? ''),
+          command: typeof d.tool_input?.command === 'string' ? d.tool_input.command.slice(0, 300) : '',
+          target: String(d.tool_input?.file_path ?? d.tool_input?.url ?? d.tool_input?.path ?? '').slice(0, 300),
+        })),
       });
       break;
     default:
@@ -169,6 +188,7 @@ function run(opts, onEvent) {
   const args = buildArgs(opts).map((a) => (useShell && /\s/.test(a) ? `"${a}"` : a));
   const child = spawn(binary, args, {
     cwd: opts.cwd || process.cwd(),
+    env: cliEnv(),
     shell: useShell,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -224,6 +244,15 @@ function run(opts, onEvent) {
       }
     },
   };
+}
+
+/**
+ * Environment for the CLI. On Windows, Claude Code checks PowerShell commands by launching a parser
+ * with a 5 s limit; a cold PowerShell start inside this app can exceed that, and the command is then
+ * rejected as "malformed syntax". Give it more time unless the user already set a value.
+ */
+function cliEnv() {
+  return { ...process.env, CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS: process.env.CLAUDE_CODE_PWSH_PARSE_TIMEOUT_MS || '30000' };
 }
 
 /**

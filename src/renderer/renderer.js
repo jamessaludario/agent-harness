@@ -9,7 +9,7 @@ log.addEventListener('click', (e) => {
 const PERM_LABELS = {
   acceptEdits: 'Auto-accept edits',
   plan: 'Plan only',
-  default: 'Ask (blocks tools)',
+  default: 'Ask first (blocks until allowed)',
   bypassPermissions: 'Bypass all',
 };
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
@@ -17,7 +17,7 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 // ---- state --------------------------------------------------------------
 let state = {
   projects: [], // { path, name, collapsed, sessions: [{ id, title, claudeSessionId, items, cost, turns, outputs }] }
-  settings: { adapterId: 'claude-code', permissionMode: 'acceptEdits', binary: '', theme: 'system', model: '', effort: '' },
+  settings: { adapterId: 'claude-code', permissionMode: 'acceptEdits', binary: '', theme: 'system', model: '', effort: '', allowedTools: [], agentBrowser: true },
   active: null, // session id
   panelOpen: true,
   sideWidth: 240,
@@ -169,12 +169,23 @@ function renderLog() {
       continue;
     }
     list = null;
-    if (it.t === 'user') log.appendChild(el('div', 'msg user', it.text));
+    if (it.t === 'user') {
+      const m = el('div', 'msg user');
+      if (it.files?.length) {
+        const row = el('div', 'msg-files');
+        for (const f of it.files) row.appendChild(el('span', 'file-chip', `${fileIcon(f)} ${f.name}`));
+        m.appendChild(row);
+      }
+      if (it.skill) m.appendChild(el('div', 'skill-badge', `/${it.skill}`));
+      if (it.text) m.appendChild(el('div', null, it.text));
+      log.appendChild(m);
+    }
     else if (it.t === 'assistant') {
       const m = el('div', 'msg assistant');
       renderRich(m, it.text);
       log.appendChild(m);
     } else if (it.t === 'error') log.appendChild(el('div', 'msg error', it.text));
+    else if (it.t === 'denied') log.appendChild(deniedEl(it));
     else if (it.t === 'footer') log.appendChild(el('div', 'footer', it.text));
   }
   if (runtime.has(s.id)) {
@@ -186,6 +197,7 @@ function renderLog() {
     }
   }
   log.scrollTop = log.scrollHeight;
+  window.linkifyFiles?.(log); // file names that exist become clickable
 }
 
 function thinkingEl(last) {
@@ -287,7 +299,7 @@ function renderPanel() {
   for (const p of f?.s.outputs ?? []) {
     const b = el('button', 'row link', baseName(p));
     b.title = p;
-    b.addEventListener('click', () => window.harness.reveal(p));
+    b.addEventListener('click', () => (window.openFileInPane ? window.openFileInPane(p) : window.harness.reveal(p)));
     out.appendChild(b);
   }
   if (f && !f.s.outputs.length) out.appendChild(el('div', 'muted', 'No files yet'));
@@ -371,6 +383,7 @@ function refresh() {
   renderLog();
   renderPanel();
   renderChrome();
+  window.onRefresh?.();
 }
 
 // ---- agent events -------------------------------------------------------
@@ -438,6 +451,7 @@ window.harness.onEvent(({ runId, event }) => {
       }
       if (parts.length) s.items.push({ t: 'footer', text: parts.join(' · ') });
       if (event.isError && event.text) s.items.push({ t: 'error', text: event.text });
+      if (event.denials?.length) s.items.push({ t: 'denied', denials: event.denials });
       break;
     }
     case 'error':
@@ -459,16 +473,121 @@ window.harness.onEvent(({ runId, event }) => {
 });
 
 // ---- actions ------------------------------------------------------------
+// ---- attachments (button, drag & drop, paste) -----------------------------------
+const MAX_ATTACH = 10;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const attached = []; // { path, name, isImage } for the message being written
+
+function renderAttachments() {
+  const bar = $('attachBar');
+  bar.replaceChildren();
+  bar.hidden = !attached.length;
+  for (const a of attached) {
+    const chip = el('span', 'file-chip removable');
+    chip.title = a.path;
+    chip.append(el('span', null, `${fileIcon(a)} ${a.name}`));
+    const x = el('button', 'x shown', '×');
+    x.type = 'button';
+    x.title = 'Remove';
+    x.addEventListener('click', () => {
+      attached.splice(attached.indexOf(a), 1);
+      renderAttachments();
+    });
+    chip.appendChild(x);
+    bar.appendChild(chip);
+  }
+}
+
+const fileIcon = (f) => (f.isDir ? '📁' : f.isImage ? '🖼' : '📄');
+
+function addAttachments(paths, { dir = false } = {}) {
+  for (const p of paths) {
+    if (!p || attached.some((a) => a.path === p)) continue;
+    if (attached.length >= MAX_ATTACH) break;
+    const name = baseName(p);
+    attached.push({ path: p, name, isImage: !dir && IMAGE_EXT.test(name), isDir: dir });
+  }
+  renderAttachments();
+}
+
+// Dropped/pasted File objects: use the real path when there is one, otherwise save the bytes.
+async function addFileObjects(files) {
+  const paths = [];
+  for (const f of files) {
+    let p = window.harness.pathForFile(f);
+    if (!p) {
+      try {
+        p = await window.harness.saveAttachmentBlob(f.name || 'pasted-image.png', new Uint8Array(await f.arrayBuffer()));
+      } catch (e) {
+        alert(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+        continue;
+      }
+    }
+    paths.push(p);
+  }
+  addAttachments(paths);
+}
+
+// + opens a small menu: files or a whole folder
+$('attachBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('attachMenu').hidden = !$('attachMenu').hidden;
+});
+document.addEventListener('click', () => { $('attachMenu').hidden = true; });
+$('attachFiles').addEventListener('click', async () => addAttachments(await window.harness.pickAttachments('files')));
+$('attachFolder').addEventListener('click', async () => addAttachments(await window.harness.pickAttachments('folder'), { dir: true }));
+const composerBox = document.querySelector('.composer');
+for (const t of ['dragenter', 'dragover']) {
+  composerBox.addEventListener(t, (e) => {
+    if (![...(e.dataTransfer?.types ?? [])].includes('Files')) return;
+    e.preventDefault();
+    composerBox.classList.add('dropping');
+  });
+}
+composerBox.addEventListener('dragleave', (e) => {
+  if (!composerBox.contains(e.relatedTarget)) composerBox.classList.remove('dropping');
+});
+composerBox.addEventListener('drop', (e) => {
+  composerBox.classList.remove('dropping');
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  addFileObjects([...e.dataTransfer.files]);
+});
+$('prompt').addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (!files.length) return; // plain text paste behaves as usual
+  e.preventDefault();
+  addFileObjects(files);
+});
+// a file dropped anywhere else must not navigate the app away
+for (const t of ['dragover', 'drop']) document.addEventListener(t, (e) => e.preventDefault());
+
 async function send() {
   const text = $('prompt').value.trim();
-  if (!text) return;
+  const files = attached.splice(0);
+  if (!text && !files.length) return;
+  // "/skill-name args" runs that skill (resolveSlash comes from memory.js); built-ins like /memory are handled there
+  const slash = window.resolveSlash?.(text);
+  if (slash?.handled) {
+    $('prompt').value = '';
+    autosize();
+    attached.push(...files);
+    renderAttachments();
+    return;
+  }
+  renderAttachments();
   let s = activeSession();
   if (!s) s = newSession(addProject(defaultFolder()));
-  if (runtime.has(s.id)) return;
+  if (runtime.has(s.id)) {
+    attached.push(...files); // still busy: keep what was attached
+    renderAttachments();
+    return;
+  }
   const f = findSession(s.id);
 
-  s.items.push({ t: 'user', text });
-  if (s.title === 'New session') s.title = text.length > 48 ? `${text.slice(0, 48)}…` : text;
+  s.items.push({ t: 'user', text, skill: slash?.skill?.name, files: files.map(({ name, isImage, isDir }) => ({ name, isImage, isDir })) });
+  const label = text || files.map((x) => x.name).join(', ');
+  if (s.title === 'New session') s.title = label.length > 48 ? `${label.slice(0, 48)}…` : label;
   $('prompt').value = '';
   autosize();
 
@@ -480,13 +599,16 @@ async function send() {
     await window.harness.run({
       runId,
       adapterId: state.settings.adapterId,
-      prompt: text,
+      prompt: slash?.skill ? slash.args || 'Run this skill.' : text || 'Please look at the attached files.',
+      skillId: slash?.skill?.id,
+      attachments: files.map((x) => x.path),
       cwd: f.p.path || undefined,
       extraDirs: s.extraDirs ?? [],
       sessionId: s.claudeSessionId,
       permissionMode: state.settings.permissionMode,
       model: state.settings.model || undefined,
       effort: state.settings.effort || undefined,
+      allowedTools: state.settings.allowedTools,
       binary: state.settings.binary || undefined,
     });
   } catch (e) {
@@ -811,6 +933,8 @@ function renderLayout() {
   $('dock').hidden = !d.open;
   $('browserPane').hidden = d.tab !== 'browser';
   $('termPane').hidden = d.tab !== 'terminal';
+  $('filesPane').hidden = d.tab !== 'files';
+  $('toggleFiles').classList.toggle('on', d.open && d.tab === 'files');
   $('toggleBrowser').classList.toggle('on', d.open && d.tab === 'browser');
   $('toggleTerminal').classList.toggle('on', d.open && d.tab === 'terminal');
   $('togglePanel').classList.toggle('on', state.panelOpen);
@@ -944,6 +1068,21 @@ function initDock() {
     if (e.key === 'Enter') { e.preventDefault(); browserGo($('bUrl').value); e.target.blur(); }
   });
   $('bUrl').addEventListener('focus', (e) => e.target.select());
+  h.browser.setAgentEnabled(state.settings.agentBrowser !== false);
+  $('setAgentBrowser').checked = state.settings.agentBrowser !== false;
+  $('setAgentBrowser').addEventListener('change', (e) => {
+    state.settings.agentBrowser = e.target.checked;
+    h.browser.setAgentEnabled(e.target.checked);
+    save();
+  });
+  // the agent is about to use the pane: make sure the user can see it
+  h.browser.onShow(() => {
+    if (d.open && d.tab === 'browser') return syncBrowser();
+    d.open = true;
+    d.tab = 'browser';
+    renderLayout();
+    save();
+  });
   h.browser.onState((s) => {
     if (document.activeElement !== $('bUrl')) $('bUrl').value = s.url;
     $('bBack').disabled = !s.canGoBack;
@@ -1018,6 +1157,7 @@ function initDock() {
   if (state.limits?.at && Date.now() - state.limits.at > 7 * 864e5) state.limits = null;
   initDock();
   $('setBinary').value = state.settings.binary;
+  $('setAllowed').value = (state.settings.allowedTools ?? []).join('\n');
   $('setTheme').value = state.settings.theme;
   applyTheme();
   appVersion = await window.harness.appVersion();
@@ -1027,3 +1167,90 @@ function initDock() {
   refresh();
   runCheck({ silent: true });
 })();
+
+// ---- blocked commands: offer to allow them -------------------------------------
+// Runs are headless, so the CLI cannot ask; it reports what it refused and we let the user allow it.
+function rulesFor(d) {
+  if ((d.tool === 'Bash' || d.tool === 'PowerShell') && d.command) {
+    const first = d.command.trim().split(/\s*(?:&&|\|\||;|\|)\s*/)[0].split(/\s+/)[0].replace(/^["']|["']$/g, '');
+    if (/^[A-Za-z0-9_.:\\/-]+$/.test(first)) return { label: first + ' *', rules: ['Bash(' + first + ' *)', 'PowerShell(' + first + ' *)'] };
+  }
+  if (/^[A-Za-z][A-Za-z0-9_]*$/.test(d.tool)) return { label: d.tool, rules: [d.tool] };
+  return null;
+}
+
+function deniedEl(item) {
+  const box = el('div', 'denied');
+  box.appendChild(el('div', 'denied-title', 'Blocked: this run could not get approval for'));
+  for (const d of item.denials) box.appendChild(el('div', 'denied-cmd', d.command || d.target || d.tool));
+  const offers = new Map();
+  for (const d of item.denials) {
+    const r = rulesFor(d);
+    if (r && !offers.has(r.label)) offers.set(r.label, r.rules);
+  }
+  // a file the agent could not reach because it lives outside the session's folders
+  const folders = new Map();
+  for (const d of item.denials) {
+    if (d.target && /^([A-Za-z]:[\\/]|\/)/.test(d.target)) {
+      const dir = d.target.replace(/[\\/][^\\/]*$/, '');
+      if (dir && !folders.has(dir)) folders.set(dir, baseName(dir));
+    }
+  }
+  const row = el('div', 'denied-actions');
+  if (item.resolved) {
+    row.appendChild(el('span', 'muted', item.resolved));
+  } else {
+    for (const [label, rules] of offers) {
+      const b = el('button', 'primary-sm', 'Always allow ' + label);
+      b.type = 'button';
+      b.title = 'Adds ' + rules.join(', ') + ' to Settings → Allowed commands, then continues';
+      b.addEventListener('click', () => allowRules(item, label, rules));
+      row.appendChild(b);
+    }
+    for (const [dir, name] of folders) {
+      const b = el('button', 'primary-sm', 'Add folder ' + name);
+      b.type = 'button';
+      b.title = 'Gives this session read/write access to ' + dir + ', then continues';
+      b.addEventListener('click', () => allowFolder(item, dir, name));
+      row.appendChild(b);
+    }
+    row.appendChild(el('span', 'muted', 'or switch the mode below to Bypass all'));
+  }
+  box.appendChild(row);
+  return box;
+}
+
+function allowFolder(item, dir, name) {
+  const s = activeSession();
+  if (!s) return;
+  s.extraDirs = s.extraDirs ?? [];
+  if (!s.extraDirs.includes(dir)) s.extraDirs.push(dir);
+  item.resolved = 'Added folder ' + name;
+  save();
+  renderLog();
+  renderPanel();
+  if (!runtime.has(s.id)) {
+    $('prompt').value = 'I added the folder ' + name + ' to this session. Please continue where you left off.';
+    send();
+  }
+}
+
+function allowRules(item, label, rules) {
+  const set = new Set(state.settings.allowedTools ?? []);
+  rules.forEach((r) => set.add(r));
+  state.settings.allowedTools = [...set];
+  $('setAllowed').value = state.settings.allowedTools.join('\n');
+  item.resolved = 'Allowed ' + label;
+  save();
+  renderLog();
+  const s = activeSession();
+  if (s && !runtime.has(s.id)) {
+    $('prompt').value = 'I have allowed ' + label + ' now. Please continue where you left off.';
+    send();
+  }
+}
+
+$('setAllowed').addEventListener('input', (e) => {
+  state.settings.allowedTools = e.target.value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  save();
+});

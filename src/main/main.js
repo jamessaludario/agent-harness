@@ -5,6 +5,9 @@ const adapters = require('./adapters');
 const setup = require('./setup');
 const dock = require('./dock');
 const memory = require('./memory');
+const attachments = require('./attachments');
+const browserMcp = require('./browser-mcp');
+const files = require('./files');
 const crypto = require('node:crypto');
 
 // The app was called "Agent Harness" before "Rubick"; keep using that data folder so
@@ -100,6 +103,16 @@ ipcMain.handle('dialog:pickFile', async () => {
   return res.canceled ? null : res.filePaths[0];
 });
 
+ipcMain.handle('dialog:pickAttachments', async (_e, kind) => {
+  const folder = kind === 'folder';
+  const res = await dialog.showOpenDialog(win, {
+    title: folder ? 'Attach a folder' : 'Attach files',
+    properties: folder ? ['openDirectory'] : ['openFile', 'multiSelections'],
+  });
+  return res.canceled ? [] : res.filePaths;
+});
+ipcMain.handle('attach:saveBlob', (_e, name, bytes) => attachments.saveBlob(name, bytes));
+
 ipcMain.handle('theme:set', (_e, pref, bg) => {
   nativeTheme.themeSource = ['light', 'dark', 'system'].includes(pref) ? pref : 'system';
   if (win && !win.isDestroyed() && /^#[0-9a-f]{6}$/i.test(bg)) win.setBackgroundColor(bg);
@@ -136,16 +149,35 @@ ipcMain.handle('agent:run', (_e, req) => {
 
   // Memory bank: applicable entries go to the agent as extra system prompt, via a temp file.
   const mem = memory.buildPrompt(req.cwd || '');
+  mem.dirs ??= [];
   let memoryFile;
-  if (mem.text) {
+  // Browser pane tools: the agent connects to a local MCP server backed by the pane (if the user allows it)
+  const withBrowser = agentBrowserEnabled && browserMcp.isRunning();
+  let mcpConfigFile;
+  if (withBrowser) {
+    mcpConfigFile = path.join(app.getPath('userData'), `mcp-${crypto.randomUUID()}.json`);
+    fs.writeFileSync(mcpConfigFile, JSON.stringify(browserMcp.config()), { mode: 0o600 });
+  }
+  const systemText = mem.text + (withBrowser ? browserMcp.AGENT_HINT : '');
+  if (systemText) {
     memoryFile = path.join(app.getPath('userData'), `memory-${crypto.randomUUID()}.md`);
-    fs.writeFileSync(memoryFile, mem.text);
+    fs.writeFileSync(memoryFile, systemText);
+  }
+  if (mem.text) {
     memory.markUsed(mem.ids);
     sendWin('agent:event', { runId, event: { type: 'memory', count: mem.ids.length } });
   }
 
   let reply = '';
-  const handle = adapter.run({ ...req, cwd, binary, memoryFile }, (event) => {
+  // zip skills keep templates on disk; the agent needs read access to those folders
+  const invoked = typeof req.skillId === 'string' ? memory.skillInvocation(req.skillId) : null; // /skill-name
+  const baseDirs = [...new Set([...(Array.isArray(req.extraDirs) ? req.extraDirs : []), ...mem.dirs, ...(invoked?.dir ? [invoked.dir] : [])])];
+  // chat attachments: tell the agent where they are and let it read them
+  const att = attachments.prepare(req.attachments, { cwd, allowed: baseDirs });
+  const extraDirs = [...new Set([...baseDirs, ...att.dirs])];
+  const prompt = (invoked?.text ?? '') + String(req.prompt || '') + att.block;
+  const allowedTools = [...(Array.isArray(req.allowedTools) ? req.allowedTools : []), ...(withBrowser ? [`mcp__${browserMcp.SERVER_NAME}`] : [])];
+  const handle = adapter.run({ ...req, prompt, cwd, binary, memoryFile, extraDirs, mcpConfigFile, allowedTools }, (event) => {
     if (event.type === 'text-delta' && reply.length < 4000) reply += event.text;
     if (event.type === 'result' && !event.isError) {
       memory
@@ -158,7 +190,10 @@ ipcMain.handle('agent:run', (_e, req) => {
         .then((entry) => entry && sendWin('memory:learned', entry))
         .catch(() => {}); // learning is best-effort and must never disturb a run
     }
-    if (event.type === 'exit' && memoryFile) fs.rm(memoryFile, { force: true }, () => {});
+    if (event.type === 'exit') {
+      if (memoryFile) fs.rm(memoryFile, { force: true }, () => {});
+      if (mcpConfigFile) fs.rm(mcpConfigFile, { force: true }, () => {});
+    }
     if (!win || win.isDestroyed()) return;
     win.webContents.send('agent:event', { runId, event });
     if (event.type === 'exit') running.delete(runId);
@@ -175,6 +210,10 @@ const sendWin = (ch, payload) => {
   if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
 };
 dock.init({ getWindow: () => win, onBrowserState: (s) => sendWin('browser:state', s) });
+let agentBrowserEnabled = true; // Settings switch; the renderer sends the saved value at startup
+ipcMain.handle('browser:agentEnabled', (_e, on) => {
+  agentBrowserEnabled = !!on;
+});
 ipcMain.handle('browser:bounds', (_e, b) => dock.setBounds(b));
 ipcMain.handle('browser:visible', (_e, v) => dock.setVisible(v));
 ipcMain.handle('browser:go', (_e, url) => dock.navigate(url));
@@ -188,6 +227,16 @@ ipcMain.handle('term:run', (_e, req) => {
 ipcMain.handle('term:kill', (_e, termId) => dock.termKill(termId));
 ipcMain.handle('term:checkDir', (_e, dir) => dock.validCwd(dir));
 
+// ---- file explorer ----
+ipcMain.handle('files:list', (_e, dir, roots) => files.list(dir, roots));
+ipcMain.handle('files:read', (_e, file, roots) => files.read(file, roots));
+ipcMain.handle('files:find', (_e, root, q, roots) => files.find(root, q, roots));
+ipcMain.handle('files:search', (_e, root, q, roots) => files.search(root, q, roots));
+ipcMain.handle('files:git', (_e, root, roots) => files.gitStatus(root, roots));
+ipcMain.handle('files:resolve', (_e, candidates, roots, base) => files.resolve(candidates, roots, base));
+ipcMain.handle('files:watch', (_e, file, roots) => files.watch(file, roots, (p) => sendWin('files:changed', p)));
+ipcMain.handle('files:unwatch', (_e, file) => files.unwatch(file));
+
 // ---- memory bank ----
 ipcMain.handle('memory:list', () => memory.list());
 ipcMain.handle('memory:save', (_e, entry) => memory.upsert(entry || {}));
@@ -197,12 +246,17 @@ ipcMain.handle('memory:resolve', (_e, id, accept) => memory.resolve(id, !!accept
 ipcMain.handle('memory:learning', (_e, mode) => memory.setLearning(mode));
 ipcMain.handle('memory:importSkill', async () => {
   const res = await dialog.showOpenDialog(win, {
-    title: 'Choose a skill (SKILL.md)',
+    title: 'Choose a skill (.zip package or SKILL.md)',
     properties: ['openFile'],
-    filters: [{ name: 'Skill / markdown', extensions: ['md', 'markdown', 'txt'] }],
+    filters: [
+      { name: 'Skill (zip or markdown)', extensions: ['zip', 'md', 'markdown', 'txt'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
   });
   if (res.canceled) return null;
   const file = res.filePaths[0];
+  // A zip carries SKILL.md plus its templates and other files
+  if (/\.zip$/i.test(file)) return memory.extractSkillZip(fs.readFileSync(file), path.parse(file).name);
   if (fs.statSync(file).size > 500 * 1024) throw new Error('That file is too large to be a skill (500 KB max)');
   // SKILL.md is named after its folder
   const base = path.basename(file).toLowerCase() === 'skill.md' ? path.basename(path.dirname(file)) : path.parse(file).name;
@@ -227,7 +281,12 @@ ipcMain.handle('update:install', () => updater?.install());
 
 app.whenReady().then(() => {
   memory.init(app.getPath('userData'));
+  attachments.init(app.getPath('userData'));
+  files.init([path.join(app.getPath('userData'), 'skills'), path.join(app.getPath('userData'), 'attachments')]);
   createWindow();
+  browserMcp
+    .start({ pane: dock.pane, showPane: () => sendWin('browser:show'), isEnabled: () => agentBrowserEnabled })
+    .catch((e) => console.error('Browser tools unavailable:', e.message));
   updater = require('./updater').init((event) => {
     if (win && !win.isDestroyed()) win.webContents.send('update:event', event);
   });
@@ -235,6 +294,8 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   running.forEach((h) => h.cancel());
   dock.killAll();
+  browserMcp.stop();
+  files.unwatchAll();
   setup.cancelLogin();
 });
 app.on('window-all-closed', () => app.quit());

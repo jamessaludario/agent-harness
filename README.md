@@ -87,6 +87,42 @@ first, then skills; 16k character budget). Each entry can be limited to one proj
   Review. Duplicates (and anything you dismissed) are never re-suggested, at most 20 wait at a time, unreviewed
   suggestions expire after 14 days, and accepted ones that are never used are flagged "unused" after 60 days.
 
+## Attachments and slash commands
+
+- **Attach:** the **+** in the composer adds files or a whole folder; you can also drop files on the composer or
+  paste a screenshot. The agent reads them with its own file tools (up to 10 per message), and gets access to
+  their folders for that run. Pasted images are saved as scratch copies and cleaned up after 7 days.
+- **Skills from a zip:** *Import skill…* accepts a `.zip` containing `SKILL.md` plus templates or other files
+  (at the zip root or inside one folder). The package is unpacked into the app's data folder and the agent is
+  told where to read its templates. Zips are limited to 20 MB / 500 files, encrypted or Zip64 archives are rejected.
+- **Slash commands:** type `/` in the composer to pick a skill (`/draft-ticket fix the login bug`); that skill's
+  full text is sent with the request. `/memory` and `/new` are built in.
+
+## Files pane
+
+The folder icon in the top-right group opens the Files pane: tabbed previews on the left, and on the right the
+session's folder (plus any added folders) as a tree with git markers (M modified, U untracked), a filter box
+(type a name, or start with ? to search inside files) and a collapse-all button; ⋯ has refresh, reveal and copy
+path. Code is syntax-highlighted with line numbers. Previews: markdown renders as a page (toggle to source), images show inline, text and code show with line
+numbers, anything else offers *Reveal*. Open files refresh by themselves when they change, so a regenerated test
+report updates live. File names in the chat (inline code like `ticket_runs/issue_1048/report.md`, or markdown
+links to a path) become clickable when the file exists, and so do the entries under Outputs. Only files inside the
+session's folders (and the app's own skill/attachment folders) can be previewed.
+
+## Letting the agent use the browser pane
+
+Each agent run is given a small local MCP server (`browser-mcp.js`, listening on 127.0.0.1 with a random per-launch
+token) backed by the Browser pane, so the agent can navigate, read the page, click, type, scroll, screenshot and read
+console errors. The pane opens by itself when the agent uses it, and you stay signed in there across launches.
+Passwords and recovery codes are never typed by the agent (password fields are refused, and the agent is told to ask
+you). Turn it off in **Settings → Let the agent use the browser pane**.
+
+## Permissions and folders
+
+Agent runs are headless, so they cannot pop up approvals. Anything blocked shows a card with one-click fixes:
+**Always allow `gh *`** (saved under Settings → Allowed commands) or **Add folder X** when a file lives outside the
+session's folders (the same as *+ Add folder* in the Environment panel). Both then continue the run.
+
 ## Adding an adapter
 
 Emit normalized events (`init`, `text-delta`, `tool-use`, `tool-result`,

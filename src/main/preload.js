@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
 
@@ -11,6 +11,15 @@ contextBridge.exposeInMainWorld('harness', {
   pickFile: invoke('dialog:pickFile'),
   reveal: invoke('shell:reveal'),
   openExternal: invoke('shell:openExternal'),
+  pickAttachments: invoke('dialog:pickAttachments'),
+  saveAttachmentBlob: invoke('attach:saveBlob'),
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || '';
+    } catch {
+      return '';
+    }
+  },
   setTheme: invoke('theme:set'),
   run: invoke('agent:run'),
   cancel: invoke('agent:cancel'),
@@ -23,6 +32,12 @@ contextBridge.exposeInMainWorld('harness', {
     openUrl: invoke('setup:openUrl'),
   },
   browser: {
+    setAgentEnabled: invoke('browser:agentEnabled'),
+    onShow: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on('browser:show', handler);
+      return () => ipcRenderer.removeListener('browser:show', handler);
+    },
     setBounds: invoke('browser:bounds'),
     setVisible: invoke('browser:visible'),
     go: invoke('browser:go'),
@@ -32,6 +47,21 @@ contextBridge.exposeInMainWorld('harness', {
       const handler = (_e, payload) => cb(payload);
       ipcRenderer.on('browser:state', handler);
       return () => ipcRenderer.removeListener('browser:state', handler);
+    },
+  },
+  files: {
+    list: invoke('files:list'),
+    read: invoke('files:read'),
+    resolve: invoke('files:resolve'),
+    find: invoke('files:find'),
+    search: invoke('files:search'),
+    git: invoke('files:git'),
+    watch: invoke('files:watch'),
+    unwatch: invoke('files:unwatch'),
+    onChanged: (cb) => {
+      const handler = (_e, p) => cb(p);
+      ipcRenderer.on('files:changed', handler);
+      return () => ipcRenderer.removeListener('files:changed', handler);
     },
   },
   memory: {

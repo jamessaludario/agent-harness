@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:" />
   <title>Rubick</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -27,6 +27,9 @@
       <header class="topbar">
         <div id="title" class="title">New session</div>
         <span class="top-actions">
+          <button id="toggleFiles" class="icon-btn" title="Files" aria-label="Files">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.75 4.5a1.5 1.5 0 0 1 1.5-1.5h2.9l1.5 1.75h4.6a1.5 1.5 0 0 1 1.5 1.5v5.75a1.5 1.5 0 0 1-1.5 1.5H3.25a1.5 1.5 0 0 1-1.5-1.5z"/></svg>
+          </button>
           <button id="toggleTerminal" class="icon-btn" title="Terminal (Ctrl+`)" aria-label="Terminal">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.5 6l2 2-2 2M8 10.5h3.5"/></svg>
           </button>
@@ -42,12 +45,21 @@
       <form id="form" class="composer-wrap">
         <div id="memToast" class="toast" hidden><span id="memToastText" class="ellipsis"></span><button type="button" id="memToastReview" class="ghost-sm">Review</button><button type="button" id="memToastClose" class="icon-btn" title="Dismiss">&times;</button></div>
         <div class="composer">
+          <div id="slashMenu" class="menu slash-menu" hidden></div>
+          <div id="attachMenu" class="menu attach-menu" hidden>
+            <button type="button" id="attachFiles" class="menu-item"><span>Add files…</span></button>
+            <button type="button" id="attachFolder" class="menu-item"><span>Add folder…</span></button>
+          </div>
+          <div id="attachBar" class="attach-bar" hidden></div>
           <textarea id="prompt" rows="1" placeholder="Type your task here"></textarea>
           <div class="composer-row">
+            <button id="attachBtn" type="button" class="icon-btn attach-btn" title="Attach files or a folder (or drop / paste them here)" aria-label="Attach">
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg>
+            </button>
             <select id="perm" title="Permission mode">
               <option value="acceptEdits">Auto-accept edits</option>
               <option value="plan">Plan only</option>
-              <option value="default">Ask (blocks tools)</option>
+              <option value="default">Ask first (blocks until allowed)</option>
               <option value="bypassPermissions">Bypass all</option>
             </select>
             <select id="adapterSel" title="Agent"></select>
@@ -80,6 +92,37 @@
           <button id="bClose" class="icon-btn" title="Close">&times;</button>
         </div>
         <div id="browserHost" class="browser-host"></div>
+      </div>
+      <div id="filesPane" class="dock-body fx" hidden>
+        <div class="fx-main">
+          <div class="fx-top">
+            <div id="fTabs" class="fx-tabs"></div>
+            <span class="spacer"></span>
+            <button id="fSearch" class="icon-btn" title="Search files" aria-label="Search files"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg></button>
+            <button id="fCollapse" class="icon-btn" title="Collapse all folders" aria-label="Collapse all folders"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2.5l4 3.5 4-3.5M4 13.5L8 10l4 3.5"/></svg></button>
+            <button id="fToggleTree" class="icon-btn" title="Show or hide the file list" aria-label="Show or hide the file list"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01"/></svg></button>
+            <button id="fMore" class="icon-btn" title="More" aria-label="More"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="3" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="13" cy="8" r="1.2"/></svg></button>
+            <button id="fExpand" class="icon-btn" title="Make this pane wider" aria-label="Make this pane wider"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9"/></svg></button>
+            <button id="fClose" class="icon-btn" title="Close" aria-label="Close"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button>
+            <div id="fMoreMenu" class="menu fx-menu" hidden>
+              <button type="button" id="fmRefresh" class="menu-item"><span>Refresh</span></button>
+              <button type="button" id="fmMode" class="menu-item"><span>View source</span></button>
+              <button type="button" id="fmReveal" class="menu-item"><span>Reveal in folder</span></button>
+              <button type="button" id="fmCopy" class="menu-item"><span>Copy path</span></button>
+            </div>
+          </div>
+          <div id="fBar" class="fx-crumb" hidden><span id="fPath" class="ellipsis"></span></div>
+          <div id="fView" class="f-view"></div>
+        </div>
+        <div id="fSide" class="fx-side">
+          <div id="fSideResize" class="resize-h left" title="Drag to resize"></div>
+          <div class="fx-filter">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+            <input id="fFilter" placeholder="Filter, or ? to search in files" spellcheck="false" autocomplete="off" />
+          </div>
+          <select id="fRoot" class="f-root" title="Folder" hidden></select>
+          <div id="fTree" class="f-tree"></div>
+        </div>
       </div>
       <div id="termPane" class="dock-body" hidden>
         <div class="term-head">
@@ -157,6 +200,13 @@
           <button type="button" id="clearBinary" class="ghost" title="Use auto-detect">Reset</button>
         </span>
       </label>
+      <label class="check"><input type="checkbox" id="setAgentBrowser" /> Let the agent use the browser pane (open pages, read, click, type; never passwords)</label>
+      <label>Allowed commands (one rule per line)
+        <textarea id="setAllowed" rows="4" spellcheck="false" placeholder="PowerShell(gh *)
+Bash(gh *)
+WebFetch"></textarea>
+      </label>
+      <div class="muted" style="font-size:11.5px;margin:-6px 0 12px">Agent runs cannot pop up approvals, so commands not listed here (or covered by the mode) are blocked. Use the Allow button on a blocked message, or add rules here.</div>
       <div id="detected" class="muted"></div>
       <div class="acct-row">
         <span id="updateStatus" class="muted">Version …</span>
@@ -176,7 +226,7 @@
     <div id="memTabs" class="mem-tabs"></div>
     <div class="mem-toolbar">
       <button type="button" id="memAdd" class="primary-sm">+ Add</button>
-      <button type="button" id="memSkill" class="ghost-sm">Import skill…</button>
+      <button type="button" id="memSkill" class="ghost-sm">Import skill…</button><span id="memSkillHint" class="muted" style="font-size:11.5px">.zip with templates, or SKILL.md</span>
       <span class="spacer"></span>
       <label class="inline">Self-learning
         <select id="memLearn" title="How the app proposes new memories from your messages">
@@ -194,6 +244,7 @@
       </div>
       <input id="mfTitle" placeholder="Title (e.g. Run tests before commit)" maxlength="120" autocomplete="off" />
       <textarea id="mfBody" rows="6" placeholder="What should the agent remember?"></textarea>
+      <div id="mfFiles" class="muted mem-help" hidden></div>
       <div id="mfError" class="mem-error" hidden></div>
       <div class="mem-row"><span class="spacer"></span><button type="button" id="mfCancel" class="ghost-sm">Cancel</button><button type="submit" class="primary-sm">Save</button></div>
     </form>
@@ -203,5 +254,8 @@
   <script src="markdown.js"></script>
   <script src="renderer.js"></script>
   <script src="memory.js"></script>
+  <script src="highlight.js"></script>
+  <script src="files.js"></script>
+  <script src="slash.js"></script>
 </body>
 </html>
