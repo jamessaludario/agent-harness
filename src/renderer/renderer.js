@@ -16,7 +16,9 @@ let state = {
   settings: { adapterId: 'claude-code', permissionMode: 'acceptEdits', binary: '', theme: 'system', model: '', effort: '' },
   active: null, // session id
   panelOpen: true,
-  dock: { open: false, tab: 'browser', width: 480, url: '' },
+  sideWidth: 240,
+  panelWidth: 250,
+  dock: { open: false, tab: 'browser', width: 420, url: '' },
   limits: null, // { windows: { five_hour: {utilization, resetsAt}, ... }, status, at }
   draftFolder: null, // folder chosen on the New screen ('' = no folder)
 };
@@ -803,27 +805,28 @@ $('obCodeInput').addEventListener('keydown', (e) => {
 $('runSetup').addEventListener('click', () => { $('dlg').close(); runCheck(); });
 
 // ---- dock: browser + terminal ---------------------------------------------
-const PANEL_W = 250;
+const clamp = (n, lo, hi) => Math.min(Math.max(n, lo), hi);
 function renderLayout() {
   const d = state.dock;
-  const cols = ['240px', 'minmax(0, 1fr)'];
+  // a saved width may not fit a smaller window; keep room for the chat
+  d.width = Math.min(d.width, Math.max(300, window.innerWidth - state.sideWidth - (state.panelOpen ? state.panelWidth : 0) - 320));
+  const cols = [`${state.sideWidth}px`, 'minmax(0, 1fr)'];
   if (d.open) cols.push(`${d.width}px`);
-  if (state.panelOpen) cols.push(`${PANEL_W}px`);
+  if (state.panelOpen) cols.push(`${state.panelWidth}px`);
   $('app').style.gridTemplateColumns = cols.join(' ');
   $('app').classList.toggle('no-panel', !state.panelOpen);
   $('dock').hidden = !d.open;
   $('browserPane').hidden = d.tab !== 'browser';
   $('termPane').hidden = d.tab !== 'terminal';
-  $('tabBrowser').classList.toggle('on', d.tab === 'browser');
-  $('tabTerminal').classList.toggle('on', d.tab === 'terminal');
   $('toggleBrowser').classList.toggle('on', d.open && d.tab === 'browser');
   $('toggleTerminal').classList.toggle('on', d.open && d.tab === 'terminal');
+  $('togglePanel').classList.toggle('on', state.panelOpen);
   syncBrowser();
 }
 
 function openDock(tab) {
   const d = state.dock;
-  // clicking the button for the tab that's already showing closes the dock
+  // clicking the button for the pane that's already showing closes the dock
   if (d.open && d.tab === tab) d.open = false;
   else { d.open = true; d.tab = tab; }
   renderLayout();
@@ -849,19 +852,23 @@ function browserGo(text) {
   window.harness.browser.go(t);
 }
 
-// terminal
+// terminal: one flowing screen, PowerShell-style prompt with the input inline
 const term = { running: false, history: [], hi: -1, cwd: null };
 const TERM_ID = 'main';
 const stripAnsi = (s) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
 const termDir = () => term.cwd ?? defaultFolder();
+const termPromptText = () => `PS ${termDir() || '~'}>`;
 
 function renderTermBar() {
-  const dir = termDir();
-  $('termDir').textContent = dir ? `▸ ${dir}` : '▸ No folder';
-  $('termDir').title = dir || 'Working directory (click to change)';
-  $('termPrompt').textContent = dir ? `${baseName(dir)}>` : '>';
+  $('termPrompt').textContent = termPromptText();
   $('termKill').hidden = !term.running;
-  $('termIn').disabled = term.running;
+  $('termPrompt').hidden = term.running;
+  $('termIn').hidden = term.running;
+}
+
+function termScroll() {
+  const s = $('termScreen');
+  s.scrollTop = s.scrollHeight;
 }
 
 function termPrint(text, cls) {
@@ -869,14 +876,15 @@ function termPrint(text, cls) {
   if (cls) out.appendChild(el('span', cls, text));
   else out.appendChild(document.createTextNode(text));
   while (out.textContent.length > 200000 && out.firstChild) out.removeChild(out.firstChild);
-  out.scrollTop = out.scrollHeight;
+  termScroll();
 }
 
 async function termSubmit(command) {
-  if (term.running || !command.trim()) return;
+  if (term.running) return;
+  if (!command.trim()) { termPrint(`${termPromptText()}\n`); return; }
   term.history.push(command);
   term.hi = term.history.length;
-  termPrint(`${$('termPrompt').textContent} ${command}\n`, 'cmd');
+  termPrint(`${termPromptText()} ${command}\n`);
   term.running = true;
   renderTermBar();
   try {
@@ -888,37 +896,47 @@ async function termSubmit(command) {
   }
 }
 
+// drag handle: reports the pointer's x while held
+function makeResizer(handle, onMove) {
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('drag');
+    const move = (ev) => onMove(ev.clientX);
+    const up = () => {
+      handle.classList.remove('drag');
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      save();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+  });
+}
+
 function initDock() {
   const h = window.harness;
   const d = state.dock;
-  d.width = Math.min(Math.max(Number(d.width) || 480, 300), 1200);
+  d.width = clamp(Number(d.width) || 420, 300, 1200);
+  state.sideWidth = clamp(Number(state.sideWidth) || 240, 160, 600);
+  state.panelWidth = clamp(Number(state.panelWidth) || 250, 200, 600);
 
   $('toggleBrowser').addEventListener('click', () => openDock('browser'));
   $('toggleTerminal').addEventListener('click', () => openDock('terminal'));
-  $('tabBrowser').addEventListener('click', () => { d.tab = 'browser'; renderLayout(); save(); });
-  $('tabTerminal').addEventListener('click', () => { d.tab = 'terminal'; renderLayout(); renderTermBar(); save(); $('termIn').focus(); });
   $('dockClose').addEventListener('click', () => { d.open = false; renderLayout(); save(); });
+  $('bClose').addEventListener('click', () => { d.open = false; renderLayout(); save(); });
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key === '`') { e.preventDefault(); openDock('terminal'); }
   });
 
-  // resize by dragging the dock's left edge
-  $('dockResize').addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    $('dockResize').setPointerCapture(e.pointerId);
-    const move = (ev) => {
-      const max = Math.max(300, window.innerWidth - 240 - (state.panelOpen ? PANEL_W : 0) - 320);
-      d.width = Math.round(Math.min(Math.max(window.innerWidth - (state.panelOpen ? PANEL_W : 0) - ev.clientX, 300), max));
-      renderLayout();
-    };
-    const up = () => {
-      $('dockResize').removeEventListener('pointermove', move);
-      $('dockResize').removeEventListener('pointerup', up);
-      save();
-    };
-    $('dockResize').addEventListener('pointermove', move);
-    $('dockResize').addEventListener('pointerup', up);
-  });
+  // each handle sets its column's width from the pointer, keeping the chat >= 320px
+  const MIN_MAIN = 320;
+  const used = (skip) =>
+    (skip === 'side' ? 0 : state.sideWidth) + (skip === 'dock' || !d.open ? 0 : d.width) + (skip === 'panel' || !state.panelOpen ? 0 : state.panelWidth);
+  const fit = (skip, min, want) => clamp(Math.round(want), min, Math.max(min, window.innerWidth - used(skip) - MIN_MAIN));
+  makeResizer($('sideResize'), (x) => { state.sideWidth = fit('side', 160, x); renderLayout(); });
+  makeResizer($('dockResize'), (x) => { d.width = fit('dock', 300, window.innerWidth - x - (state.panelOpen ? state.panelWidth : 0)); renderLayout(); });
+  makeResizer($('panelResize'), (x) => { state.panelWidth = fit('panel', 200, window.innerWidth - x); renderLayout(); });
 
   new ResizeObserver(syncBrowser).observe($('browserHost'));
   window.addEventListener('resize', syncBrowser);
@@ -947,20 +965,20 @@ function initDock() {
     if (ev.termId !== TERM_ID) return;
     if (ev.type === 'out') termPrint(stripAnsi(ev.text));
     else if (ev.type === 'exit') {
-      termPrint(`\n[exit ${ev.code}]\n`, ev.code ? 'bad' : 'cmd');
+      if (ev.code) termPrint(`[exit ${ev.code}]\n`, 'bad');
       term.running = false;
       renderTermBar();
       $('termIn').focus();
+      termScroll();
     }
   });
-  $('termForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const v = $('termIn').value;
-    $('termIn').value = '';
-    termSubmit(v);
-  });
   $('termIn').addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp' && term.history.length) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const v = $('termIn').value;
+      $('termIn').value = '';
+      termSubmit(v);
+    } else if (e.key === 'ArrowUp' && term.history.length) {
       e.preventDefault();
       term.hi = Math.max(0, term.hi - 1);
       $('termIn').value = term.history[term.hi] ?? '';
@@ -968,13 +986,24 @@ function initDock() {
       e.preventDefault();
       term.hi = Math.min(term.history.length, term.hi + 1);
       $('termIn').value = term.history[term.hi] ?? '';
-    } else if (e.key === 'c' && e.ctrlKey && term.running) h.term.kill(TERM_ID);
+    } else if (e.key === 'l' && e.ctrlKey) {
+      e.preventDefault();
+      $('termOut').replaceChildren();
+    }
+  });
+  // Ctrl+C stops a running command (the input is hidden then, so listen on the pane)
+  $('termPane').addEventListener('keydown', (e) => {
+    if (e.key === 'c' && e.ctrlKey && term.running) h.term.kill(TERM_ID);
+  });
+  $('termScreen').addEventListener('click', () => {
+    if (!getSelection().toString()) $('termIn').focus(); // don't steal focus while selecting output
   });
   $('termKill').addEventListener('click', () => h.term.kill(TERM_ID));
-  $('termClear').addEventListener('click', () => $('termOut').replaceChildren());
-  $('termDir').addEventListener('click', async () => {
+  $('termClear').addEventListener('click', () => { $('termOut').replaceChildren(); $('termIn').focus(); });
+  $('termPrompt').addEventListener('click', async (e) => {
+    e.stopPropagation();
     const dir = await h.pickFolder();
-    if (dir) { term.cwd = dir; renderTermBar(); }
+    if (dir) { term.cwd = dir; renderTermBar(); $('termIn').focus(); }
   });
   renderTermBar();
 }

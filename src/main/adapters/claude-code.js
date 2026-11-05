@@ -35,10 +35,10 @@ function validDir(d) {
 // What the UI may offer for this agent ('' = let the CLI choose).
 const models = [
   { id: '', label: 'Default model' },
-  { id: 'fable', label: 'Fable' },
-  { id: 'opus', label: 'Opus' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1' },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5' },
 ];
 const efforts = [
   { id: '', label: 'Default effort' },

@@ -1,6 +1,7 @@
 {
   "name": "agent-harness",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "productName": "Rubick",
   "description": "Desktop harness that drives coding agents through pluggable adapters",
   "author": "James Saludario",
   "main": "src/main/main.js",
@@ -18,7 +19,7 @@
   },
   "build": {
     "appId": "com.agentharness.app",
-    "productName": "Agent Harness",
+    "productName": "Rubick",
     "directories": {
       "output": "release"
     },

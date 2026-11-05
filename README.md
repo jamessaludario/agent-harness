@@ -1,4 +1,4 @@
-# Agent Harness
+# Rubick
 
 An Electron desktop app that drives coding agents through pluggable adapters.
 Layout and flow are modeled on the Claude desktop app: project folders and
@@ -36,7 +36,7 @@ credentials. On first launch a setup screen:
 ## Installer and updates
 
 ```bash
-npm run dist      # builds release/Agent Harness Setup <version>.exe locally
+npm run dist      # builds release/Rubick Setup <version>.exe locally
 ```
 
 The installed app checks GitHub Releases on launch (and every 4 hours), downloads

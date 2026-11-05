@@ -28,7 +28,7 @@ jobs:
       # parallel and, with no release to attach to, creates duplicate drafts.
       - name: Create draft release
         shell: bash
-        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "Agent Harness ${GITHUB_REF_NAME#v}" --generate-notes
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "Rubick ${GITHUB_REF_NAME#v}" --generate-notes
 
       - run: npx electron-builder --win --publish always
 

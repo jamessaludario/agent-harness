@@ -5,6 +5,10 @@ const adapters = require('./adapters');
 const setup = require('./setup');
 const dock = require('./dock');
 
+// The app was called "Agent Harness" before "Rubick"; keep using that data folder so
+// saved sessions and settings survive the rename.
+app.setPath('userData', path.join(app.getPath('appData'), app.isPackaged ? 'Agent Harness' : 'agent-harness'));
+
 let win;
 const running = new Map(); // runId -> { cancel }
 
