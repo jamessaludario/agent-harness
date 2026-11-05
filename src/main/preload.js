@@ -21,6 +21,27 @@ contextBridge.exposeInMainWorld('harness', {
     cancelLogin: invoke('setup:login:cancel'),
     openUrl: invoke('setup:openUrl'),
   },
+  browser: {
+    setBounds: invoke('browser:bounds'),
+    setVisible: invoke('browser:visible'),
+    go: invoke('browser:go'),
+    nav: invoke('browser:nav'),
+    openExternal: invoke('browser:external'),
+    onState: (cb) => {
+      const handler = (_e, payload) => cb(payload);
+      ipcRenderer.on('browser:state', handler);
+      return () => ipcRenderer.removeListener('browser:state', handler);
+    },
+  },
+  term: {
+    run: invoke('term:run'),
+    kill: invoke('term:kill'),
+    onEvent: (cb) => {
+      const handler = (_e, payload) => cb(payload);
+      ipcRenderer.on('term:event', handler);
+      return () => ipcRenderer.removeListener('term:event', handler);
+    },
+  },
   appVersion: invoke('app:version'),
   checkForUpdates: invoke('update:check'),
   installUpdate: invoke('update:install'),

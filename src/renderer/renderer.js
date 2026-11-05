@@ -13,9 +13,11 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 // ---- state --------------------------------------------------------------
 let state = {
   projects: [], // { path, name, collapsed, sessions: [{ id, title, claudeSessionId, items, cost, turns, outputs }] }
-  settings: { adapterId: 'claude-code', permissionMode: 'acceptEdits', binary: '', theme: 'system' },
+  settings: { adapterId: 'claude-code', permissionMode: 'acceptEdits', binary: '', theme: 'system', model: '', effort: '' },
   active: null, // session id
   panelOpen: true,
+  dock: { open: false, tab: 'browser', width: 480, url: '' },
+  limits: null, // { windows: { five_hour: {utilization, resetsAt}, ... }, status, at }
   draftFolder: null, // folder chosen on the New screen ('' = no folder)
 };
 const runs = new Map(); // runId -> { sessionId }
@@ -300,7 +302,45 @@ function renderPanel() {
     out.appendChild(b);
   }
   if (f && !f.s.outputs.length) out.appendChild(el('div', 'muted', 'No files yet'));
-  $('app').classList.toggle('no-panel', !state.panelOpen);
+  renderLimits();
+  renderLayout();
+}
+
+// ---- plan usage limits ------------------------------------------------------
+const WINDOW_LABELS = { five_hour: '5-hour limit', seven_day: 'Weekly · all models', seven_day_opus: 'Weekly · Opus', seven_day_sonnet: 'Weekly · Sonnet' };
+
+function fmtReset(epochSec) {
+  if (!epochSec) return '';
+  const d = new Date(epochSec * 1000);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === new Date().toDateString()) return `Resets at ${time}`;
+  return `Resets ${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+}
+
+function renderLimits() {
+  const box = $('limits');
+  box.replaceChildren();
+  const windows = Object.entries(state.limits?.windows ?? {});
+  if (!windows.length) {
+    box.appendChild(el('div', 'muted', 'Shown after your first message'));
+    return;
+  }
+  // Windows past their reset have been refilled; don't show stale numbers as current.
+  const now = Date.now() / 1000;
+  for (const [key, w] of windows) {
+    const expired = w.resetsAt && w.resetsAt < now;
+    const pct = expired ? 0 : Math.min(100, Math.round(w.utilization * 100));
+    const row = el('div', 'limit');
+    const head = el('div', 'limit-head');
+    head.append(el('span', null, WINDOW_LABELS[key] ?? key.replace(/_/g, ' ')), el('span', null, `${pct}%`));
+    const bar = el('div', 'bar');
+    const fill = el('i', pct >= 90 ? 'hot' : pct >= 70 ? 'warn' : '');
+    fill.style.width = `${pct}%`;
+    bar.appendChild(fill);
+    row.append(head, bar, el('div', 'limit-sub', expired ? 'Reset' : fmtReset(w.resetsAt)));
+    box.appendChild(row);
+  }
+  if (state.limits.at) box.appendChild(el('div', 'limit-sub', `Updated ${new Date(state.limits.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`));
 }
 
 function renderChrome() {
@@ -315,7 +355,26 @@ function renderChrome() {
   $('send').hidden = busy;
   $('stop').hidden = !busy;
   $('perm').value = state.settings.permissionMode;
-  $('adapterLabel').textContent = $('setAdapter').selectedOptions[0]?.textContent ?? '';
+  fillAgentSelects();
+}
+
+// Agent / model / effort selectors in the composer. Options come from the adapter.
+let adapterList = [];
+const currentAdapter = () => adapterList.find((a) => a.id === state.settings.adapterId) ?? adapterList[0];
+
+function fillSelect(sel, items, value) {
+  sel.replaceChildren(...items.map((i) => Object.assign(el('option', null, i.label), { value: i.id })));
+  sel.value = items.some((i) => i.id === value) ? value : items[0]?.id ?? '';
+  sel.hidden = items.length < 2;
+}
+
+function fillAgentSelects() {
+  const a = currentAdapter();
+  if (!a) return;
+  fillSelect($('adapterSel'), adapterList, a.id);
+  fillSelect($('modelSel'), a.models, state.settings.model);
+  fillSelect($('effortSel'), a.efforts, state.settings.effort);
+  $('setAdapter').value = a.id;
 }
 
 function refresh() {
@@ -369,6 +428,11 @@ window.harness.onEvent(({ runId, event }) => {
       }
       break;
     }
+    case 'rate-limit':
+      if (Object.keys(event.windows).length) state.limits = { windows: event.windows, status: event.status, at: Date.now() };
+      renderLimits();
+      rerender = false;
+      break;
     case 'result': {
       s.turns++;
       const parts = [];
@@ -426,6 +490,8 @@ async function send() {
       extraDirs: s.extraDirs ?? [],
       sessionId: s.claudeSessionId,
       permissionMode: state.settings.permissionMode,
+      model: state.settings.model || undefined,
+      effort: state.settings.effort || undefined,
       binary: state.settings.binary || undefined,
     });
   } catch (e) {
@@ -508,12 +574,20 @@ $('togglePanel').addEventListener('click', () => {
 });
 
 // settings dialog
-$('settings').addEventListener('click', () => $('dlg').showModal());
-$('setAdapter').addEventListener('change', (e) => {
-  state.settings.adapterId = e.target.value;
+$('settings').addEventListener('click', () => { $('dlg').showModal(); syncBrowser(); });
+function setAdapter(id) {
+  state.settings.adapterId = id;
+  // model/effort lists differ per agent; drop choices the new agent doesn't offer
+  const a = currentAdapter();
+  if (!a.models.some((m) => m.id === state.settings.model)) state.settings.model = '';
+  if (!a.efforts.some((m) => m.id === state.settings.effort)) state.settings.effort = '';
   renderChrome();
   save();
-});
+}
+$('setAdapter').addEventListener('change', (e) => setAdapter(e.target.value));
+$('adapterSel').addEventListener('change', (e) => setAdapter(e.target.value));
+$('modelSel').addEventListener('change', (e) => { state.settings.model = e.target.value; save(); });
+$('effortSel').addEventListener('change', (e) => { state.settings.effort = e.target.value; save(); });
 $('setBinary').addEventListener('input', (e) => {
   state.settings.binary = e.target.value.trim();
   save();
@@ -604,8 +678,9 @@ function obShow(title, text, { code = false, error = '', log = false } = {}) {
   $('obError').textContent = error;
   $('obLog').hidden = !log;
   if (code) $('obCodeInput').focus();
+  syncBrowser();
 }
-const obHide = () => { $('onboard').hidden = true; };
+const obHide = () => { $('onboard').hidden = true; syncBrowser(); };
 
 function renderAccount(st) {
   $('account').textContent = !st.found
@@ -727,6 +802,183 @@ $('obCodeInput').addEventListener('keydown', (e) => {
 });
 $('runSetup').addEventListener('click', () => { $('dlg').close(); runCheck(); });
 
+// ---- dock: browser + terminal ---------------------------------------------
+const PANEL_W = 250;
+function renderLayout() {
+  const d = state.dock;
+  const cols = ['240px', 'minmax(0, 1fr)'];
+  if (d.open) cols.push(`${d.width}px`);
+  if (state.panelOpen) cols.push(`${PANEL_W}px`);
+  $('app').style.gridTemplateColumns = cols.join(' ');
+  $('app').classList.toggle('no-panel', !state.panelOpen);
+  $('dock').hidden = !d.open;
+  $('browserPane').hidden = d.tab !== 'browser';
+  $('termPane').hidden = d.tab !== 'terminal';
+  $('tabBrowser').classList.toggle('on', d.tab === 'browser');
+  $('tabTerminal').classList.toggle('on', d.tab === 'terminal');
+  $('toggleBrowser').classList.toggle('on', d.open && d.tab === 'browser');
+  $('toggleTerminal').classList.toggle('on', d.open && d.tab === 'terminal');
+  syncBrowser();
+}
+
+function openDock(tab) {
+  const d = state.dock;
+  // clicking the button for the tab that's already showing closes the dock
+  if (d.open && d.tab === tab) d.open = false;
+  else { d.open = true; d.tab = tab; }
+  renderLayout();
+  save();
+  if (d.open && tab === 'terminal') { renderTermBar(); $('termIn').focus(); }
+}
+
+// The browser is a native view floating above the page, so it must be moved to sit
+// over #browserHost and hidden whenever a dialog or overlay is on screen.
+function syncBrowser() {
+  const d = state.dock;
+  const show = d.open && d.tab === 'browser' && !$('dlg').open && $('onboard').hidden;
+  if (show) {
+    const r = $('browserHost').getBoundingClientRect();
+    window.harness.browser.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }
+  window.harness.browser.setVisible(show);
+}
+
+function browserGo(text) {
+  const t = text.trim();
+  if (!t) return;
+  window.harness.browser.go(t);
+}
+
+// terminal
+const term = { running: false, history: [], hi: -1, cwd: null };
+const TERM_ID = 'main';
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+const termDir = () => term.cwd ?? defaultFolder();
+
+function renderTermBar() {
+  const dir = termDir();
+  $('termDir').textContent = dir ? `▸ ${dir}` : '▸ No folder';
+  $('termDir').title = dir || 'Working directory (click to change)';
+  $('termPrompt').textContent = dir ? `${baseName(dir)}>` : '>';
+  $('termKill').hidden = !term.running;
+  $('termIn').disabled = term.running;
+}
+
+function termPrint(text, cls) {
+  const out = $('termOut');
+  if (cls) out.appendChild(el('span', cls, text));
+  else out.appendChild(document.createTextNode(text));
+  while (out.textContent.length > 200000 && out.firstChild) out.removeChild(out.firstChild);
+  out.scrollTop = out.scrollHeight;
+}
+
+async function termSubmit(command) {
+  if (term.running || !command.trim()) return;
+  term.history.push(command);
+  term.hi = term.history.length;
+  termPrint(`${$('termPrompt').textContent} ${command}\n`, 'cmd');
+  term.running = true;
+  renderTermBar();
+  try {
+    await window.harness.term.run({ termId: TERM_ID, command, cwd: termDir() || undefined });
+  } catch (e) {
+    termPrint(`${String(e.message || e)}\n`, 'bad');
+    term.running = false;
+    renderTermBar();
+  }
+}
+
+function initDock() {
+  const h = window.harness;
+  const d = state.dock;
+  d.width = Math.min(Math.max(Number(d.width) || 480, 300), 1200);
+
+  $('toggleBrowser').addEventListener('click', () => openDock('browser'));
+  $('toggleTerminal').addEventListener('click', () => openDock('terminal'));
+  $('tabBrowser').addEventListener('click', () => { d.tab = 'browser'; renderLayout(); save(); });
+  $('tabTerminal').addEventListener('click', () => { d.tab = 'terminal'; renderLayout(); renderTermBar(); save(); $('termIn').focus(); });
+  $('dockClose').addEventListener('click', () => { d.open = false; renderLayout(); save(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === '`') { e.preventDefault(); openDock('terminal'); }
+  });
+
+  // resize by dragging the dock's left edge
+  $('dockResize').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    $('dockResize').setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      const max = Math.max(300, window.innerWidth - 240 - (state.panelOpen ? PANEL_W : 0) - 320);
+      d.width = Math.round(Math.min(Math.max(window.innerWidth - (state.panelOpen ? PANEL_W : 0) - ev.clientX, 300), max));
+      renderLayout();
+    };
+    const up = () => {
+      $('dockResize').removeEventListener('pointermove', move);
+      $('dockResize').removeEventListener('pointerup', up);
+      save();
+    };
+    $('dockResize').addEventListener('pointermove', move);
+    $('dockResize').addEventListener('pointerup', up);
+  });
+
+  new ResizeObserver(syncBrowser).observe($('browserHost'));
+  window.addEventListener('resize', syncBrowser);
+  $('dlg').addEventListener('close', syncBrowser);
+
+  // browser controls
+  $('bBack').addEventListener('click', () => h.browser.nav('back'));
+  $('bFwd').addEventListener('click', () => h.browser.nav('forward'));
+  $('bReload').addEventListener('click', () => h.browser.nav('reload'));
+  $('bExternal').addEventListener('click', () => h.browser.openExternal());
+  $('bUrl').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); browserGo($('bUrl').value); e.target.blur(); }
+  });
+  $('bUrl').addEventListener('focus', (e) => e.target.select());
+  h.browser.onState((s) => {
+    if (document.activeElement !== $('bUrl')) $('bUrl').value = s.url;
+    $('bBack').disabled = !s.canGoBack;
+    $('bFwd').disabled = !s.canGoForward;
+    $('bReload').textContent = s.loading ? '…' : '↻';
+    if (s.url) { d.url = s.url; save(); }
+  });
+  if (d.url && d.open && d.tab === 'browser') { $('bUrl').value = d.url; h.browser.go(d.url); }
+
+  // terminal
+  h.term.onEvent((ev) => {
+    if (ev.termId !== TERM_ID) return;
+    if (ev.type === 'out') termPrint(stripAnsi(ev.text));
+    else if (ev.type === 'exit') {
+      termPrint(`\n[exit ${ev.code}]\n`, ev.code ? 'bad' : 'cmd');
+      term.running = false;
+      renderTermBar();
+      $('termIn').focus();
+    }
+  });
+  $('termForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('termIn').value;
+    $('termIn').value = '';
+    termSubmit(v);
+  });
+  $('termIn').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && term.history.length) {
+      e.preventDefault();
+      term.hi = Math.max(0, term.hi - 1);
+      $('termIn').value = term.history[term.hi] ?? '';
+    } else if (e.key === 'ArrowDown' && term.history.length) {
+      e.preventDefault();
+      term.hi = Math.min(term.history.length, term.hi + 1);
+      $('termIn').value = term.history[term.hi] ?? '';
+    } else if (e.key === 'c' && e.ctrlKey && term.running) h.term.kill(TERM_ID);
+  });
+  $('termKill').addEventListener('click', () => h.term.kill(TERM_ID));
+  $('termClear').addEventListener('click', () => $('termOut').replaceChildren());
+  $('termDir').addEventListener('click', async () => {
+    const dir = await h.pickFolder();
+    if (dir) { term.cwd = dir; renderTermBar(); }
+  });
+  renderTermBar();
+}
+
 // ---- boot ---------------------------------------------------------------
 (async () => {
   const saved = await window.harness.loadState();
@@ -734,12 +986,15 @@ $('runSetup').addEventListener('click', () => { $('dlg').close(); runCheck(); })
     state = { ...state, ...saved, settings: { ...state.settings, ...saved.settings } };
     if (!findSession(state.active)) state.active = state.projects[0]?.sessions[0]?.id ?? null;
   }
-  for (const a of await window.harness.listAdapters()) {
+  adapterList = await window.harness.listAdapters();
+  for (const a of adapterList) {
     const o = el('option', null, a.label);
     o.value = a.id;
     $('setAdapter').appendChild(o);
   }
   $('setAdapter').value = state.settings.adapterId;
+  if (state.limits?.at && Date.now() - state.limits.at > 7 * 864e5) state.limits = null;
+  initDock();
   $('setBinary').value = state.settings.binary;
   $('setTheme').value = state.settings.theme;
   applyTheme();

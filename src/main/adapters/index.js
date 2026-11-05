@@ -7,5 +7,5 @@ const adapters = new Map([[claudeCode.id, claudeCode]]);
 
 module.exports = {
   get: (id) => adapters.get(id),
-  list: () => [...adapters.values()].map((a) => ({ id: a.id, label: a.label })),
+  list: () => [...adapters.values()].map((a) => ({ id: a.id, label: a.label, models: a.models ?? [], efforts: a.efforts ?? [] })),
 };

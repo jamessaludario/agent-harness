@@ -24,7 +24,11 @@
     <section class="main">
       <header class="topbar">
         <div id="title" class="title">New session</div>
-        <button id="togglePanel" class="icon-btn" title="Toggle side panel">&#9707;</button>
+        <span class="top-actions">
+          <button id="toggleBrowser" class="icon-btn" title="Browser pane">&#127760; Browser</button>
+          <button id="toggleTerminal" class="icon-btn" title="Terminal (Ctrl+`)">&#9002;_ Terminal</button>
+          <button id="togglePanel" class="icon-btn" title="Toggle side panel">&#9707;</button>
+        </span>
       </header>
       <div id="log" class="log"></div>
       <form id="form" class="composer-wrap">
@@ -37,7 +41,9 @@
               <option value="default">Ask (blocks tools)</option>
               <option value="bypassPermissions">Bypass all</option>
             </select>
-            <span id="adapterLabel" class="muted"></span>
+            <select id="adapterSel" title="Agent"></select>
+            <select id="modelSel" title="Model"></select>
+            <select id="effortSel" title="Effort"></select>
             <span class="spacer"></span>
             <button id="send" type="submit" class="send" title="Send">&#8593;</button>
             <button id="stop" type="button" class="send stop" title="Stop" hidden>&#9632;</button>
@@ -53,6 +59,39 @@
       </form>
     </section>
 
+    <aside id="dock" class="dock" hidden>
+      <div id="dockResize" class="dock-resize" title="Drag to resize"></div>
+      <div class="dock-tabs">
+        <button id="tabBrowser" class="dock-tab">Browser</button>
+        <button id="tabTerminal" class="dock-tab">Terminal</button>
+        <span class="spacer"></span>
+        <button id="dockClose" class="icon-btn" title="Close">&times;</button>
+      </div>
+      <div id="browserPane" class="dock-body" hidden>
+        <div class="browser-bar">
+          <button id="bBack" class="icon-btn" title="Back">&#8592;</button>
+          <button id="bFwd" class="icon-btn" title="Forward">&#8594;</button>
+          <button id="bReload" class="icon-btn" title="Reload">&#8635;</button>
+          <input id="bUrl" class="url" placeholder="Enter a URL, e.g. localhost:8765" spellcheck="false" autocomplete="off" />
+          <button id="bExternal" class="icon-btn" title="Open in your default browser">&#8599;</button>
+        </div>
+        <div id="browserHost" class="browser-host"></div>
+      </div>
+      <div id="termPane" class="dock-body" hidden>
+        <div class="term-bar">
+          <button id="termDir" class="chip btn ellipsis" title="Working directory (click to change)"></button>
+          <span class="spacer"></span>
+          <button id="termClear" class="chip btn">Clear</button>
+        </div>
+        <pre id="termOut" class="term-out"></pre>
+        <form id="termForm" class="term-form">
+          <span id="termPrompt" class="term-prompt">&gt;</span>
+          <input id="termIn" placeholder="Run a command, e.g. python -m pytest" spellcheck="false" autocomplete="off" />
+          <button id="termKill" type="button" class="chip btn" hidden>Stop</button>
+        </form>
+      </div>
+    </aside>
+
     <aside id="panel" class="panel">
       <section>
         <h4>Environment</h4>
@@ -61,6 +100,10 @@
         <div id="extraDirs"></div>
         <button type="button" id="addDir" class="row link muted" title="Give this session access to another folder">+ Add folder</button>
         <div class="row"><span class="ic">&#9873;</span><span id="envPerm" class="ellipsis"></span></div>
+      </section>
+      <section>
+        <h4>Plan usage limits</h4>
+        <div id="limits"></div>
       </section>
       <section>
         <h4>Context</h4>

@@ -61,6 +61,17 @@ until a code-signing certificate is added.
 - `src/main/main.js` - window, IPC, run registry
 - `src/renderer/` - UI
 
+## Browser, terminal, agent picker, plan usage
+
+- **Browser / Terminal** (top bar; Ctrl+` opens the terminal): a dock beside the
+  chat. The browser keeps its sign-ins between launches. The terminal runs one
+  PowerShell command at a time in the session's folder (click the path to change
+  it); it is not a full PTY, so interactive programs won't work.
+- **Agent / model / effort** selectors sit in the composer; effort maps to
+  `claude --effort`.
+- **Plan usage limits** (side panel) come from the `rate_limit_event` messages
+  Claude Code emits, so they update after each message and no credentials are read.
+
 ## Adding an adapter
 
 Emit normalized events (`init`, `text-delta`, `tool-use`, `tool-result`,

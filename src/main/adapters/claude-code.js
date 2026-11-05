@@ -32,7 +32,25 @@ function validDir(d) {
   }
 }
 
-function buildArgs({ sessionId, permissionMode, model, extraDirs }) {
+// What the UI may offer for this agent ('' = let the CLI choose).
+const models = [
+  { id: '', label: 'Default model' },
+  { id: 'fable', label: 'Fable' },
+  { id: 'opus', label: 'Opus' },
+  { id: 'sonnet', label: 'Sonnet' },
+  { id: 'haiku', label: 'Haiku' },
+];
+const efforts = [
+  { id: '', label: 'Default effort' },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Extra high' },
+  { id: 'max', label: 'Max' },
+];
+const EFFORTS = new Set(efforts.map((e) => e.id).filter(Boolean));
+
+function buildArgs({ sessionId, permissionMode, model, effort, extraDirs }) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
   if (permissionMode) {
     if (!PERMISSION_MODES.has(permissionMode)) throw new Error('Invalid permission mode');
@@ -41,6 +59,10 @@ function buildArgs({ sessionId, permissionMode, model, extraDirs }) {
   if (model) {
     if (!SAFE_TOKEN.test(model)) throw new Error('Invalid model name');
     args.push('--model', model);
+  }
+  if (effort) {
+    if (!EFFORTS.has(effort)) throw new Error('Invalid effort level');
+    args.push('--effort', effort);
   }
   if (sessionId) {
     if (!SAFE_TOKEN.test(sessionId)) throw new Error('Invalid session id');
@@ -92,6 +114,21 @@ function normalize(msg, state, emit) {
       }
       break;
     }
+    case 'rate_limit_event': {
+      // Plan usage as reported by Claude Code itself (no credentials touched).
+      const i = msg.rate_limit_info;
+      if (i && typeof i === 'object') {
+        // unifiedWindows: { five_hour: { utilization (0-1), resetsAt (epoch s) }, seven_day: {...} }
+        const windows = {};
+        for (const [k, w] of Object.entries(i.unifiedWindows ?? {})) {
+          if (w && typeof w.utilization === 'number') {
+            windows[k] = { utilization: w.utilization, resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt : null };
+          }
+        }
+        emit({ type: 'rate-limit', status: String(i.status ?? ''), windows });
+      }
+      break;
+    }
     case 'result':
       emit({
         type: 'result',
@@ -108,7 +145,7 @@ function normalize(msg, state, emit) {
 
 /**
  * Start one turn. Returns { cancel() }.
- * opts: { prompt, cwd, sessionId, permissionMode, model, binary }
+ * opts: { prompt, cwd, sessionId, permissionMode, model, effort, binary }
  */
 function run(opts, onEvent) {
   const binary = opts.binary || 'claude';
@@ -176,4 +213,4 @@ function run(opts, onEvent) {
   };
 }
 
-module.exports = { id, label, run };
+module.exports = { id, label, models, efforts, run };

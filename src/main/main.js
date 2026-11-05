@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const adapters = require('./adapters');
 const setup = require('./setup');
+const dock = require('./dock');
 
 let win;
 const running = new Map(); // runId -> { cancel }
@@ -127,6 +128,24 @@ ipcMain.handle('agent:cancel', (_e, runId) => {
   running.get(runId)?.cancel();
 });
 
+// ---- dock: browser + terminal ----
+const sendWin = (ch, payload) => {
+  if (win && !win.isDestroyed()) win.webContents.send(ch, payload);
+};
+dock.init({ getWindow: () => win, onBrowserState: (s) => sendWin('browser:state', s) });
+ipcMain.handle('browser:bounds', (_e, b) => dock.setBounds(b));
+ipcMain.handle('browser:visible', (_e, v) => dock.setVisible(v));
+ipcMain.handle('browser:go', (_e, url) => dock.navigate(url));
+ipcMain.handle('browser:nav', (_e, action) => dock.nav(action));
+ipcMain.handle('browser:external', () => dock.openExternal());
+ipcMain.handle('term:run', (_e, req) => {
+  const cwd = req.cwd || path.join(app.getPath('userData'), 'no-folder');
+  fs.mkdirSync(cwd, { recursive: true });
+  dock.termRun({ ...req, cwd }, (ev) => sendWin('term:event', ev));
+});
+ipcMain.handle('term:kill', (_e, termId) => dock.termKill(termId));
+ipcMain.handle('term:checkDir', (_e, dir) => dock.validCwd(dir));
+
 let updater;
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('update:check', () => updater?.check());
@@ -140,6 +159,7 @@ app.whenReady().then(() => {
 });
 app.on('before-quit', () => {
   running.forEach((h) => h.cancel());
+  dock.killAll();
   setup.cancelLogin();
 });
 app.on('window-all-closed', () => app.quit());
