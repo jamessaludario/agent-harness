@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'" />
+  <title>Agent Harness</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar">
+      <nav class="nav">
+        <button id="new" class="nav-item"><span class="ic">+</span>New</button>
+        <button id="searchBtn" class="nav-item"><span class="ic">&#8981;</span>Search<kbd>Ctrl+K</kbd></button>
+        <input id="search" class="search" placeholder="Search sessions" hidden />
+      </nav>
+      <div id="projects" class="projects"></div>
+      <div class="side-foot">
+        <button id="settings" class="nav-item"><span class="ic">&#9881;</span>Settings</button>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div id="title" class="title">New session</div>
+        <button id="togglePanel" class="icon-btn" title="Toggle side panel">&#9707;</button>
+      </header>
+      <div id="log" class="log"></div>
+      <form id="form" class="composer-wrap">
+        <div class="composer">
+          <textarea id="prompt" rows="1" placeholder="Type your task here"></textarea>
+          <div class="composer-row">
+            <select id="perm" title="Permission mode">
+              <option value="acceptEdits">Auto-accept edits</option>
+              <option value="plan">Plan only</option>
+              <option value="default">Ask (blocks tools)</option>
+              <option value="bypassPermissions">Bypass all</option>
+            </select>
+            <span id="adapterLabel" class="muted"></span>
+            <span class="spacer"></span>
+            <button id="send" type="submit" class="send" title="Send">&#8593;</button>
+            <button id="stop" type="button" class="send stop" title="Stop" hidden>&#9632;</button>
+          </div>
+        </div>
+        <div id="folderBar" class="folder-bar">
+          <span class="chip">&#9645; This computer</span>
+          <span class="folder-wrap">
+            <button type="button" id="folderBtn" class="chip btn">&#9645; <span id="folderName">No folder</span> &#9662;</button>
+            <div id="folderMenu" class="menu" hidden></div>
+          </span>
+        </div>
+      </form>
+    </section>
+
+    <aside id="panel" class="panel">
+      <section>
+        <h4>Environment</h4>
+        <div class="row"><span class="ic">&#9635;</span><span>This computer</span></div>
+        <div class="row"><span class="ic">&#9633;</span><span id="envFolder" class="ellipsis">No folder</span></div>
+        <div id="extraDirs"></div>
+        <button type="button" id="addDir" class="row link muted" title="Give this session access to another folder">+ Add folder</button>
+        <div class="row"><span class="ic">&#9873;</span><span id="envPerm" class="ellipsis"></span></div>
+      </section>
+      <section>
+        <h4>Context</h4>
+        <div class="row between"><span>Turns</span><span id="ctxTurns">0</span></div>
+        <div class="row between"><span>Cost (API-equiv.)</span><span id="ctxCost">$0.00</span></div>
+      </section>
+      <section>
+        <h4>Outputs</h4>
+        <div id="outputs" class="outputs"></div>
+      </section>
+    </aside>
+  </div>
+
+  <div id="onboard" class="onboard" hidden>
+    <div class="ob-card">
+      <h2 id="obTitle">Set up Claude</h2>
+      <p id="obText" class="ob-text"></p>
+      <div id="obCode" class="ob-code" hidden>
+        <input id="obCodeInput" placeholder="Paste the code from your browser" autocomplete="off" spellcheck="false" />
+        <button type="button" id="obSubmit" class="primary">Submit</button>
+      </div>
+      <div id="obError" class="ob-error" hidden></div>
+      <pre id="obLog" class="ob-log" hidden></pre>
+      <div id="obActions" class="ob-actions"></div>
+    </div>
+  </div>
+
+  <dialog id="dlg" class="dlg">
+    <form method="dialog">
+      <h3>Settings</h3>
+      <label>Agent<select id="setAdapter"></select></label>
+      <label>Theme
+        <select id="setTheme">
+          <option value="system">System</option>
+          <option value="light">Light blue</option>
+          <option value="dark">Dark blue</option>
+        </select>
+      </label>
+      <label>claude binary path
+        <span class="path-row">
+          <input id="setBinary" placeholder="Leave empty to auto-detect" />
+          <button type="button" id="browseBinary" class="ghost">Browse…</button>
+          <button type="button" id="clearBinary" class="ghost" title="Use auto-detect">Reset</button>
+        </span>
+      </label>
+      <div id="detected" class="muted"></div>
+      <div class="acct-row">
+        <span id="account" class="muted">Account: checking…</span>
+        <button type="button" id="runSetup" class="ghost">Account setup…</button>
+      </div>
+      <div class="dlg-actions"><button>Done</button></div>
+    </form>
+  </dialog>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
