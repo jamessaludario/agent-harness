@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('harness', {
   pickFolder: invoke('dialog:pickFolder'),
   pickFile: invoke('dialog:pickFile'),
   reveal: invoke('shell:reveal'),
+  openExternal: invoke('shell:openExternal'),
   setTheme: invoke('theme:set'),
   run: invoke('agent:run'),
   cancel: invoke('agent:cancel'),
@@ -31,6 +32,21 @@ contextBridge.exposeInMainWorld('harness', {
       const handler = (_e, payload) => cb(payload);
       ipcRenderer.on('browser:state', handler);
       return () => ipcRenderer.removeListener('browser:state', handler);
+    },
+  },
+  memory: {
+    list: invoke('memory:list'),
+    save: invoke('memory:save'),
+    remove: invoke('memory:remove'),
+    toggle: invoke('memory:toggle'),
+    resolve: invoke('memory:resolve'),
+    setLearning: invoke('memory:learning'),
+    importSkill: invoke('memory:importSkill'),
+    condense: invoke('memory:condense'),
+    onLearned: (cb) => {
+      const handler = (_e, payload) => cb(payload);
+      ipcRenderer.on('memory:learned', handler);
+      return () => ipcRenderer.removeListener('memory:learned', handler);
     },
   },
   term: {

@@ -12,6 +12,7 @@
       <nav class="nav">
         <button id="new" class="nav-item"><span class="ic">+</span>New</button>
         <button id="searchBtn" class="nav-item"><span class="ic">&#8981;</span>Search<kbd>Ctrl+K</kbd></button>
+        <button id="memoryBtn" class="nav-item"><span class="ic">&#9830;</span>Memory<span id="memBadge" class="badge" hidden></span></button>
         <input id="search" class="search" placeholder="Search sessions" hidden />
       </nav>
       <div id="projects" class="projects"></div>
@@ -39,6 +40,7 @@
       </header>
       <div id="log" class="log"></div>
       <form id="form" class="composer-wrap">
+        <div id="memToast" class="toast" hidden><span id="memToastText" class="ellipsis"></span><button type="button" id="memToastReview" class="ghost-sm">Review</button><button type="button" id="memToastClose" class="icon-btn" title="Dismiss">&times;</button></div>
         <div class="composer">
           <textarea id="prompt" rows="1" placeholder="Type your task here"></textarea>
           <div class="composer-row">
@@ -168,6 +170,38 @@
     </form>
   </dialog>
 
+  <dialog id="memDlg" class="dlg mem-dlg">
+    <div class="mem-head"><h3>Memory bank</h3><button type="button" id="memClose" class="icon-btn" title="Close">&times;</button></div>
+    <p class="muted mem-sub">Rules, standards, decisions and skills here are given to the agent on every run.</p>
+    <div id="memTabs" class="mem-tabs"></div>
+    <div class="mem-toolbar">
+      <button type="button" id="memAdd" class="primary-sm">+ Add</button>
+      <button type="button" id="memSkill" class="ghost-sm">Import skill…</button>
+      <span class="spacer"></span>
+      <label class="inline">Self-learning
+        <select id="memLearn" title="How the app proposes new memories from your messages">
+          <option value="off">Off</option>
+          <option value="suggest">Suggest (free)</option>
+          <option value="smart">Smart (uses Haiku)</option>
+        </select>
+      </label>
+    </div>
+    <div id="memLearnHelp" class="muted mem-help"></div>
+    <form id="memForm" class="mem-form" hidden>
+      <div class="mem-row">
+        <select id="mfType"><option value="rule">Rule</option><option value="standard">Standard</option><option value="decision">Decision</option><option value="preference">Preference</option><option value="note">Note</option><option value="skill">Skill</option></select>
+        <select id="mfScope"></select>
+      </div>
+      <input id="mfTitle" placeholder="Title (e.g. Run tests before commit)" maxlength="120" autocomplete="off" />
+      <textarea id="mfBody" rows="6" placeholder="What should the agent remember?"></textarea>
+      <div id="mfError" class="mem-error" hidden></div>
+      <div class="mem-row"><span class="spacer"></span><button type="button" id="mfCancel" class="ghost-sm">Cancel</button><button type="submit" class="primary-sm">Save</button></div>
+    </form>
+    <div id="memList" class="mem-list"></div>
+  </dialog>
+
+  <script src="markdown.js"></script>
   <script src="renderer.js"></script>
+  <script src="memory.js"></script>
 </body>
 </html>

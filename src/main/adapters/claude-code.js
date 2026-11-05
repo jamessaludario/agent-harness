@@ -24,6 +24,14 @@ const SAFE_TOKEN = /^[A-Za-z0-9._:-]+$/; // args are concatenated into a shell l
 
 const UNSAFE_PATH = /["&|<>^%\r\n]/; // could break out of a shell command line on Windows
 
+function validFile(f) {
+  try {
+    return typeof f === 'string' && path.isAbsolute(f) && !UNSAFE_PATH.test(f) && fs.statSync(f).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function validDir(d) {
   try {
     return typeof d === 'string' && path.isAbsolute(d) && !UNSAFE_PATH.test(d) && fs.statSync(d).isDirectory();
@@ -50,8 +58,13 @@ const efforts = [
 ];
 const EFFORTS = new Set(efforts.map((e) => e.id).filter(Boolean));
 
-function buildArgs({ sessionId, permissionMode, model, effort, extraDirs }) {
+function buildArgs({ sessionId, permissionMode, model, effort, extraDirs, memoryFile }) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+  if (memoryFile) {
+    // memory bank text lives in a file so it never touches the command line
+    if (!validFile(memoryFile)) throw new Error('Memory file is missing or has unsupported characters');
+    args.push('--append-system-prompt-file', memoryFile);
+  }
   if (permissionMode) {
     if (!PERMISSION_MODES.has(permissionMode)) throw new Error('Invalid permission mode');
     args.push('--permission-mode', permissionMode);
@@ -213,4 +226,43 @@ function run(opts, onEvent) {
   };
 }
 
-module.exports = { id, label, models, efforts, run };
+/**
+ * One-shot, tool-less question to a (cheap) model. Resolves with the reply text.
+ * Used by the memory bank to distill lessons and condense skills.
+ */
+function ask({ prompt, model = 'claude-haiku-5-5', binary, cwd, timeoutMs = 60000 }) {
+  return new Promise((resolve, reject) => {
+    const bin = binary || 'claude';
+    const useShell = process.platform === 'win32' && !/\.exe$/i.test(bin);
+    if (!SAFE_TOKEN.test(model)) return reject(new Error('Invalid model name'));
+    const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--model', model, '--tools', useShell ? '""' : ''];
+    const child = spawn(bin, args, { cwd: cwd || process.cwd(), shell: useShell, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('Timed out'));
+    }, timeoutMs);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (c) => (out += c));
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (c) => (err += c));
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(err.trim().slice(-500) || `exit ${code}`));
+      try {
+        resolve(String(JSON.parse(out).result ?? ''));
+      } catch {
+        resolve(out);
+      }
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+
+module.exports = { id, label, models, efforts, run, ask };

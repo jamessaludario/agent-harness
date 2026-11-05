@@ -72,6 +72,21 @@ until a code-signing certificate is added.
 - **Plan usage limits** (side panel) come from the `rate_limit_event` messages
   Claude Code emits, so they update after each message and no credentials are read.
 
+## Memory bank
+
+Open it from **Memory** in the sidebar. Entries are stored in `memory.json` in the app's data folder and
+passed to the agent on every run as extra system prompt (rules, standards, decisions, preferences, notes
+first, then skills; 16k character budget). Each entry can be limited to one project and switched on/off.
+
+- **Manual:** + Add a rule, standard, decision, preference or note.
+- **Skills:** *Import skill…* reads a `SKILL.md` (name/description front matter + body) into memory; you review
+  it before saving. Long skills can be condensed with Haiku.
+- **Self-learning** (Off / Suggest / Smart): only messages that state something lasting ("always", "never",
+  "from now on", "we use"…) are considered. *Suggest* queues them as-is; *Smart* asks Haiku whether it is a
+  durable rule and requires 70% confidence. Nothing learned is active until you press *Remember* under
+  Review. Duplicates (and anything you dismissed) are never re-suggested, at most 20 wait at a time, unreviewed
+  suggestions expire after 14 days, and accepted ones that are never used are flagged "unused" after 60 days.
+
 ## Adding an adapter
 
 Emit normalized events (`init`, `text-delta`, `tool-use`, `tool-result`,

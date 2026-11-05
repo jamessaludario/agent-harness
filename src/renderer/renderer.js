@@ -1,6 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const uid = () => crypto.randomUUID();
 const log = $('log');
+log.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[data-href]');
+  if (a) { e.preventDefault(); window.harness.openExternal(a.dataset.href); }
+});
 
 const PERM_LABELS = {
   acceptEdits: 'Auto-accept edits',
@@ -118,28 +122,8 @@ function el(tag, cls, text) {
   return e;
 }
 
-// Minimal safe rich text: ``` fences and `inline code`. Never uses innerHTML.
-function renderRich(target, text) {
-  const frag = document.createDocumentFragment();
-  const parts = text.split('```');
-  parts.forEach((part, i) => {
-    if (i % 2 === 0) {
-      // drop the newline that touches a code block so it doesn't render as a blank line
-      if (i > 0) part = part.replace(/^\n/, '');
-      if (i < parts.length - 1) part = part.replace(/\n$/, '');
-    }
-    if (i % 2 === 1) {
-      const nl = part.indexOf('\n');
-      frag.appendChild(el('pre', 'code', (nl >= 0 ? part.slice(nl + 1) : part).replace(/\n$/, '')));
-    } else {
-      part.split(/(`[^`\n]+`)/).forEach((seg) => {
-        if (/^`[^`\n]+`$/.test(seg)) frag.appendChild(el('code', null, seg.slice(1, -1)));
-        else if (seg) frag.appendChild(document.createTextNode(seg));
-      });
-    }
-  });
-  target.replaceChildren(frag);
-}
+// Assistant text is rendered as markdown (see markdown.js); DOM nodes only, never innerHTML.
+const renderRich = (target, text) => window.renderMarkdown(target, text);
 
 function toolSummary(input) {
   return String(input?.command ?? input?.file_path ?? input?.pattern ?? input?.path ?? input?.description ?? '').slice(0, 90);
@@ -433,6 +417,10 @@ window.harness.onEvent(({ runId, event }) => {
       }
       break;
     }
+    case 'memory':
+      s.memoryCount = event.count;
+      rerender = false;
+      break;
     case 'rate-limit':
       if (Object.keys(event.windows).length) state.limits = { windows: event.windows, status: event.status, at: Date.now() };
       renderLimits();
@@ -442,6 +430,8 @@ window.harness.onEvent(({ runId, event }) => {
       s.turns++;
       const parts = [];
       if (event.durationMs) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`);
+      if (s.memoryCount) parts.push(`${s.memoryCount} ${s.memoryCount === 1 ? 'memory' : 'memories'} applied`);
+      s.memoryCount = 0;
       if (event.costUsd != null) {
         s.cost += event.costUsd;
         parts.push(`$${event.costUsd.toFixed(4)} (API-equivalent)`);
@@ -841,7 +831,7 @@ function openDock(tab) {
 // over #browserHost and hidden whenever a dialog or overlay is on screen.
 function syncBrowser() {
   const d = state.dock;
-  const show = d.open && d.tab === 'browser' && !$('dlg').open && $('onboard').hidden;
+  const show = d.open && d.tab === 'browser' && !$('dlg').open && !$('memDlg').open && $('onboard').hidden;
   if (show) {
     const r = $('browserHost').getBoundingClientRect();
     window.harness.browser.setBounds({ x: r.left, y: r.top, width: r.width, height: r.height });

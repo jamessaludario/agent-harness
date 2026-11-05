@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const adapters = require('./adapters');
 const setup = require('./setup');
 const dock = require('./dock');
+const memory = require('./memory');
+const crypto = require('node:crypto');
 
 // The app was called "Agent Harness" before "Rubick"; keep using that data folder so
 // saved sessions and settings survive the rename.
@@ -103,6 +105,15 @@ ipcMain.handle('theme:set', (_e, pref, bg) => {
   if (win && !win.isDestroyed() && /^#[0-9a-f]{6}$/i.test(bg)) win.setBackgroundColor(bg);
 });
 
+ipcMain.handle('shell:openExternal', (_e, url) => {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'http:' || u.protocol === 'https:') shell.openExternal(u.toString());
+  } catch {
+    // not a URL
+  }
+});
+
 ipcMain.handle('shell:reveal', (_e, p) => {
   if (typeof p === 'string' && fs.existsSync(p)) shell.showItemInFolder(p);
 });
@@ -121,7 +132,33 @@ ipcMain.handle('agent:run', (_e, req) => {
     cwd = path.join(app.getPath('userData'), 'no-folder');
     fs.mkdirSync(cwd, { recursive: true });
   }
-  const handle = adapter.run({ ...req, cwd, binary: req.binary || setup.detectClaude() || 'claude' }, (event) => {
+  const binary = req.binary || setup.detectClaude() || 'claude';
+
+  // Memory bank: applicable entries go to the agent as extra system prompt, via a temp file.
+  const mem = memory.buildPrompt(req.cwd || '');
+  let memoryFile;
+  if (mem.text) {
+    memoryFile = path.join(app.getPath('userData'), `memory-${crypto.randomUUID()}.md`);
+    fs.writeFileSync(memoryFile, mem.text);
+    memory.markUsed(mem.ids);
+    sendWin('agent:event', { runId, event: { type: 'memory', count: mem.ids.length } });
+  }
+
+  let reply = '';
+  const handle = adapter.run({ ...req, cwd, binary, memoryFile }, (event) => {
+    if (event.type === 'text-delta' && reply.length < 4000) reply += event.text;
+    if (event.type === 'result' && !event.isError) {
+      memory
+        .learnFromTurn({
+          prompt: String(req.prompt || ''),
+          reply,
+          cwd: req.cwd || '',
+          ask: (prompt) => adapter.ask({ prompt, binary, cwd }),
+        })
+        .then((entry) => entry && sendWin('memory:learned', entry))
+        .catch(() => {}); // learning is best-effort and must never disturb a run
+    }
+    if (event.type === 'exit' && memoryFile) fs.rm(memoryFile, { force: true }, () => {});
     if (!win || win.isDestroyed()) return;
     win.webContents.send('agent:event', { runId, event });
     if (event.type === 'exit') running.delete(runId);
@@ -151,12 +188,45 @@ ipcMain.handle('term:run', (_e, req) => {
 ipcMain.handle('term:kill', (_e, termId) => dock.termKill(termId));
 ipcMain.handle('term:checkDir', (_e, dir) => dock.validCwd(dir));
 
+// ---- memory bank ----
+ipcMain.handle('memory:list', () => memory.list());
+ipcMain.handle('memory:save', (_e, entry) => memory.upsert(entry || {}));
+ipcMain.handle('memory:remove', (_e, id) => memory.remove(id));
+ipcMain.handle('memory:toggle', (_e, id, on) => memory.setEnabled(id, on));
+ipcMain.handle('memory:resolve', (_e, id, accept) => memory.resolve(id, !!accept));
+ipcMain.handle('memory:learning', (_e, mode) => memory.setLearning(mode));
+ipcMain.handle('memory:importSkill', async () => {
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Choose a skill (SKILL.md)',
+    properties: ['openFile'],
+    filters: [{ name: 'Skill / markdown', extensions: ['md', 'markdown', 'txt'] }],
+  });
+  if (res.canceled) return null;
+  const file = res.filePaths[0];
+  if (fs.statSync(file).size > 500 * 1024) throw new Error('That file is too large to be a skill (500 KB max)');
+  // SKILL.md is named after its folder
+  const base = path.basename(file).toLowerCase() === 'skill.md' ? path.basename(path.dirname(file)) : path.parse(file).name;
+  return memory.parseSkill(fs.readFileSync(file, 'utf8'), base);
+});
+ipcMain.handle('memory:condense', async (_e, id) => {
+  const e = memory.list().entries.find((x) => x.id === id);
+  if (!e) throw new Error('Memory not found');
+  const out = await adapters.get('claude-code').ask({
+    binary: setup.detectClaude() || 'claude',
+    prompt:
+      'Condense the following skill into compact instructions (max 1200 characters). Keep every concrete rule, command, name and constraint; drop examples, filler and repetition. ' +
+      'Reply with only the condensed instructions, no preface.\n\n' + e.body,
+  });
+  return memory.upsert({ ...e, body: out.trim() });
+});
+
 let updater;
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('update:check', () => updater?.check());
 ipcMain.handle('update:install', () => updater?.install());
 
 app.whenReady().then(() => {
+  memory.init(app.getPath('userData'));
   createWindow();
   updater = require('./updater').init((event) => {
     if (win && !win.isDestroyed()) win.webContents.send('update:event', event);
