@@ -562,7 +562,12 @@ window.harness.onUpdate((e) => {
     case 'progress': showUpdateStatus(`Downloading… ${e.percent}%`); break;
     case 'none': showUpdateStatus('Up to date'); break;
     case 'dev': showUpdateStatus('Updates work in the installed app only'); break;
-    case 'error': showUpdateStatus("Couldn't check for updates"); break;
+    case 'error':
+      // GitHub answers 404 when there is no release yet or the repo is private.
+      showUpdateStatus(/404|not found|no published versions|latest\.yml/i.test(e.message || '')
+        ? 'No published release found yet'
+        : "Couldn't check for updates");
+      break;
     case 'ready': {
       showUpdateStatus(`${e.version} ready to install`);
       const b = $('updateBanner');
