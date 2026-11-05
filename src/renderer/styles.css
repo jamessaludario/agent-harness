@@ -221,3 +221,4 @@ button { background: none; border: 0; cursor: pointer; }
 .dlg-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 .dlg-actions button { background: var(--accent); color: var(--accent-fg); padding: 6px 16px; border-radius: 8px; }
 .panel .resize-h.left { left: 0; }
+.empty .logo { width: 72px; height: 72px; margin-bottom: 14px; }

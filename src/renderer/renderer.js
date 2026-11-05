@@ -159,7 +159,10 @@ function renderLog() {
   const s = activeSession();
   if (!s) {
     const empty = el('div', 'empty');
-    empty.append(el('div', 'glyph', '✶'), el('h2', null, 'What should we work on?'), el('p', null, 'Pick a folder below, then describe a task.'));
+    const logo = el('img', 'logo');
+    logo.src = '../assets/icon.svg';
+    logo.alt = 'Rubick';
+    empty.append(logo,el('h2', null, 'What should we work on?'), el('p', null, 'Pick a folder below, then describe a task.'));
     log.appendChild(empty);
     return;
   }

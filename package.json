@@ -1,6 +1,6 @@
 {
   "name": "agent-harness",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "productName": "Rubick",
   "description": "Desktop harness that drives coding agents through pluggable adapters",
   "author": "James Saludario",
@@ -28,6 +28,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": "nsis",
       "signAndEditExecutable": false
     },
