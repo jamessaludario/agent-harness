@@ -548,6 +548,33 @@ $('setTheme').addEventListener('change', (e) => {
   save();
 });
 
+// ---- app updates ------------------------------------------------------------
+let appVersion = '';
+let updateText = '';
+function showUpdateStatus(text) {
+  updateText = text;
+  $('updateStatus').textContent = `Version ${appVersion}${text ? ` · ${text}` : ''}`;
+}
+window.harness.onUpdate((e) => {
+  switch (e.type) {
+    case 'checking': showUpdateStatus('Checking for updates…'); break;
+    case 'available': showUpdateStatus(`Downloading ${e.version}…`); break;
+    case 'progress': showUpdateStatus(`Downloading… ${e.percent}%`); break;
+    case 'none': showUpdateStatus('Up to date'); break;
+    case 'dev': showUpdateStatus('Updates work in the installed app only'); break;
+    case 'error': showUpdateStatus("Couldn't check for updates"); break;
+    case 'ready': {
+      showUpdateStatus(`${e.version} ready to install`);
+      const b = $('updateBanner');
+      b.textContent = `Update ${e.version} ready — restart`;
+      b.hidden = false;
+      break;
+    }
+  }
+});
+$('updateBanner').addEventListener('click', () => window.harness.installUpdate());
+$('checkUpdate').addEventListener('click', () => window.harness.checkForUpdates());
+
 // ---- first-run onboarding ------------------------------------------------
 const ob = { url: null, st: null, cancelled: false };
 const binaryOverride = () => state.settings.binary || undefined;
@@ -711,6 +738,8 @@ $('runSetup').addEventListener('click', () => { $('dlg').close(); runCheck(); })
   $('setBinary').value = state.settings.binary;
   $('setTheme').value = state.settings.theme;
   applyTheme();
+  appVersion = await window.harness.appVersion();
+  showUpdateStatus(updateText);
   const found = await window.harness.detectClaude();
   $('detected').textContent = found ? `Auto-detected: ${found}` : 'No bundled claude.exe found; will try "claude" on PATH.';
   refresh();

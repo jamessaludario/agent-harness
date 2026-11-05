@@ -127,7 +127,17 @@ ipcMain.handle('agent:cancel', (_e, runId) => {
   running.get(runId)?.cancel();
 });
 
-app.whenReady().then(createWindow);
+let updater;
+ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('update:check', () => updater?.check());
+ipcMain.handle('update:install', () => updater?.install());
+
+app.whenReady().then(() => {
+  createWindow();
+  updater = require('./updater').init((event) => {
+    if (win && !win.isDestroyed()) win.webContents.send('update:event', event);
+  });
+});
 app.on('before-quit', () => {
   running.forEach((h) => h.cancel());
   setup.cancelLogin();

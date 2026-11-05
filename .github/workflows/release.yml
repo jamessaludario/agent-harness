@@ -1,0 +1,26 @@
+name: Release
+
+# Publishes a Windows installer to GitHub Releases when you push a version tag,
+# e.g.  git tag v0.2.0 && git push origin v0.2.0
+# The tag must match "version" in package.json (without the leading v).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

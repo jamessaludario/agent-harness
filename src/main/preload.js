@@ -21,6 +21,14 @@ contextBridge.exposeInMainWorld('harness', {
     cancelLogin: invoke('setup:login:cancel'),
     openUrl: invoke('setup:openUrl'),
   },
+  appVersion: invoke('app:version'),
+  checkForUpdates: invoke('update:check'),
+  installUpdate: invoke('update:install'),
+  onUpdate: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('update:event', handler);
+    return () => ipcRenderer.removeListener('update:event', handler);
+  },
   onEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('agent:event', handler);

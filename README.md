@@ -33,6 +33,27 @@ credentials. On first launch a setup screen:
 - Light blue / dark blue / system themes
 - State saved between launches
 
+## Installer and updates
+
+```bash
+npm run dist      # builds release/Agent Harness Setup <version>.exe locally
+```
+
+The installed app checks GitHub Releases on launch (and every 4 hours), downloads
+new versions in the background, and shows a "restart" banner in the sidebar.
+Updates only work in the installed app, not under `npm start`.
+
+To ship a new version:
+
+1. Bump `version` in `package.json` (e.g. `0.2.0`) and commit.
+2. Tag and push: `git tag v0.2.0 && git push origin main v0.2.0`
+3. The `Release` workflow builds the installer and attaches it to a GitHub Release.
+
+Note: the updater can only read **public** releases. For a private repo, publish
+releases to a separate public repo (change `publish.repo` in `package.json`) or
+host the files elsewhere. Builds are unsigned, so Windows SmartScreen will warn
+until a code-signing certificate is added.
+
 ## Layout
 
 - `src/main/adapters/` - one file per agent; export `{ id, label, run(opts, onEvent) }`

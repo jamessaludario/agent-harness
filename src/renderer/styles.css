@@ -72,7 +72,9 @@ button { background: none; border: 0; cursor: pointer; }
 .x.shown { visibility: visible; margin-left: auto; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.3; } }
-.side-foot { display: flex; align-items: center; gap: 4px; padding: 8px; border-top: 1px solid var(--border); }
+.side-foot { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-top: 1px solid var(--border); }
+.update-banner { width: 100%; padding: 8px 10px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font-weight: 500; text-align: left; }
+.update-banner:hover { filter: brightness(1.08); }
 .icon-btn { padding: 6px 9px; border-radius: 8px; color: var(--muted); }
 
 /* main */

@@ -16,6 +16,7 @@
       </nav>
       <div id="projects" class="projects"></div>
       <div class="side-foot">
+        <button id="updateBanner" class="update-banner" hidden></button>
         <button id="settings" class="nav-item"><span class="ic">&#9881;</span>Settings</button>
       </div>
     </aside>
@@ -106,6 +107,10 @@
         </span>
       </label>
       <div id="detected" class="muted"></div>
+      <div class="acct-row">
+        <span id="updateStatus" class="muted">Version …</span>
+        <button type="button" id="checkUpdate" class="ghost">Check for updates</button>
+      </div>
       <div class="acct-row">
         <span id="account" class="muted">Account: checking…</span>
         <button type="button" id="runSetup" class="ghost">Account setup…</button>
