@@ -14,6 +14,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,6 +23,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+
+      # Create the (draft) release first. electron-builder uploads files in
+      # parallel and, with no release to attach to, creates duplicate drafts.
+      - name: Create draft release
+        shell: bash
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "Agent Harness ${GITHUB_REF_NAME#v}" --generate-notes
+
       - run: npx electron-builder --win --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Drafts are invisible to the in-app updater, so publish once uploaded.
+      - name: Publish release
+        shell: bash
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
