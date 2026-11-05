@@ -1,6 +1,6 @@
 {
   "name": "agent-harness",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Desktop harness that drives coding agents through pluggable adapters",
   "author": "James Saludario",
   "main": "src/main/main.js",
@@ -19,8 +19,13 @@
   "build": {
     "appId": "com.agentharness.app",
     "productName": "Agent Harness",
-    "directories": { "output": "release" },
-    "files": ["src/**/*", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
     "win": {
       "target": "nsis",
       "signAndEditExecutable": false
@@ -30,7 +35,11 @@
       "perMachine": false
     },
     "publish": [
-      { "provider": "github", "owner": "jamessaludario", "repo": "agent-harness" }
+      {
+        "provider": "github",
+        "owner": "jamessaludario",
+        "repo": "agent-harness"
+      }
     ]
   }
 }
